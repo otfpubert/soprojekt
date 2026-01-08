@@ -14,7 +14,7 @@ struct restauracja {
 volatile sig_atomic_t dzialaj = 1;
 
 void obsluga_sygnalu(int sig) {
-    printf("[OBSLUGA %d] odebralem SIGTERM\n", getpid());
+    printf("[KUCHARZ %d] odebralem SIGTERM\n", getpid());
     dzialaj = 0;
 }
 
@@ -35,7 +35,7 @@ void unlock(int sem) {
 }
 
 int main() {
-    printf("[OBSLUGA %d] start procesu obslugi\n", getpid());
+    printf("[KUCHARZ %d] start procesu kucharza\n", getpid());
     signal(SIGTERM, obsluga_sygnalu);
 
     key_t klucz = ftok("ipc_keyfile", 'R');
@@ -63,19 +63,19 @@ int main() {
     }
 
     while (dzialaj) {
-        sleep(1);
+        sleep(2); // kucharz produkuje wolniej
 
         lock(semafor_id);
+        rest->liczba_potraw++;
         printf(
-            "[OBSLUGA %d] stan restauracji: otwarta=%d, liczba_potraw=%d\n",
+            "[KUCHARZ %d] przygotowalem potrawe, razem = %d\n",
             getpid(),
-            rest->otwarta,
             rest->liczba_potraw
         );
         unlock(semafor_id);
     }
 
-    printf("[OBSLUGA %d] koncze prace\n", getpid());
+    printf("[KUCHARZ %d] koncze prace\n", getpid());
     shmdt(rest);
     return 0;
 }
