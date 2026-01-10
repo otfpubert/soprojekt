@@ -4,78 +4,65 @@
 #include <sys/shm.h>
 #include <sys/sem.h>
 #include <signal.h>
-#include <errno.h>
+
+#define P 5
+
+struct potrawa {
+    int cena;
+};
+
+struct tasma {
+    struct potrawa buf[P];
+    int head;
+    int tail;
+    int count;
+};
 
 struct restauracja {
     int otwarta;
-    int liczba_potraw;
+    struct tasma tasma;
 };
 
 volatile sig_atomic_t dzialaj = 1;
 
-void obsluga_sygnalu(int sig) {
-    printf("[OBSLUGA %d] odebralem SIGTERM\n", getpid());
+void stop(int s) {
+    printf("[OBSLUGA %d] SIGTERM, koncze\n", getpid());
     dzialaj = 0;
 }
 
 void lock(int sem) {
-    struct sembuf op = {0, -1, 0};
-    if (semop(sem, &op, 1) == -1) {
-        perror("semop lock");
-        _exit(1);
-    }
+    struct sembuf o = {0, -1, 0};
+    semop(sem, &o, 1);
 }
 
 void unlock(int sem) {
-    struct sembuf op = {0, 1, 0};
-    if (semop(sem, &op, 1) == -1) {
-        perror("semop unlock");
-        _exit(1);
-    }
+    struct sembuf o = {0, 1, 0};
+    semop(sem, &o, 1);
 }
 
 int main() {
-    printf("[OBSLUGA %d] start procesu obslugi\n", getpid());
-    signal(SIGTERM, obsluga_sygnalu);
+    printf("[OBSLUGA %d] start\n", getpid());
+    signal(SIGTERM, stop);
 
-    key_t klucz = ftok("ipc_keyfile", 'R');
-    if (klucz == -1) {
-        perror("ftok");
-        return 1;
-    }
+    key_t key = ftok("ipc_keyfile", 'R');
+    int shm = shmget(key, sizeof(struct restauracja), 0);
+    int sem = semget(key, 1, 0);
 
-    int pamiec_id = shmget(klucz, sizeof(struct restauracja), 0);
-    if (pamiec_id == -1) {
-        perror("shmget");
-        return 1;
-    }
-
-    int semafor_id = semget(klucz, 1, 0);
-    if (semafor_id == -1) {
-        perror("semget");
-        return 1;
-    }
-
-    struct restauracja *rest = shmat(pamiec_id, NULL, 0);
-    if (rest == (void *)-1) {
-        perror("shmat");
-        return 1;
-    }
+    struct restauracja *r = shmat(shm, NULL, 0);
 
     while (dzialaj) {
         sleep(1);
 
-        lock(semafor_id);
-        printf(
-            "[OBSLUGA %d] stan restauracji: otwarta=%d, liczba_potraw=%d\n",
-            getpid(),
-            rest->otwarta,
-            rest->liczba_potraw
-        );
-        unlock(semafor_id);
-    }
+        lock(sem);
+        printf("[OBSLUGA %d] tasma (%d/%d): ",
+               getpid(), r->tasma.count, P);
 
-    printf("[OBSLUGA %d] koncze prace\n", getpid());
-    shmdt(rest);
+        for (int i = 0; i < r->tasma.count; i++) {
+            int idx = (r->tasma.head + i) % P;
+            printf("%d ", r->tasma.buf[idx].cena);
+        }
+        printf("\n");
+        unlock(sem);
+    }
     return 0;
 }
