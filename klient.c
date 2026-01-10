@@ -15,8 +15,6 @@ const char *nazwy_kolorow[KOLORY] = {
     "zielony"
 };
 
-int ceny[KOLORY] = {10, 15, 20};
-
 struct talerzyk {
     int kolor;
     int cena;
@@ -50,53 +48,55 @@ void unlock(int sem) {
 }
 
 int main() {
-    srand(getpid());
-
     key_t key = ftok("ipc_keyfile", 'R');
     int shm = shmget(key, sizeof(struct restauracja), 0);
     int sem = semget(key, 1, 0);
 
     if (shm == -1 || sem == -1) {
-        perror("kucharz ipc");
+        perror("klient ipc");
         exit(1);
     }
 
     struct restauracja *r = shmat(shm, NULL, 0);
     if (r == (void*)-1) { perror("shmat"); exit(1); }
 
-    printf("[KUCHARZ %d] start procesu kucharza\n", getpid());
+    printf("[KLIENT %d] start procesu klienta\n", getpid());
 
-    while (r->otwarta) {
-        sleep(4);
+    int do_zjedzenia = (rand() % 8) + 3; // 3..10
+    int zjedzone = 0;
+    int rachunek = 0;
+
+    while (zjedzone < do_zjedzenia) {
+        sleep(3);
 
         lock(sem);
 
-        if (r->tasma.count < P) {
-            int k = rand() % KOLORY;
+        if (r->tasma.count > 0) {
+            struct talerzyk t = r->tasma.buf[r->tasma.head];
+            r->tasma.head = (r->tasma.head + 1) % P;
+            r->tasma.count--;
+            r->sprzedane[t.kolor]++;
 
-            struct talerzyk t;
-            t.kolor = k;
-            t.cena = ceny[k];
-            t.ilosc_ryb = (rand() % 2) + 1;
-
-            r->tasma.buf[r->tasma.tail] = t;
-            r->tasma.tail = (r->tasma.tail + 1) % P;
-            r->tasma.count++;
-            r->wyprodukowane[k]++;
+            zjedzone++;
+            rachunek += t.cena;
 
             printf(
-                "[KUCHARZ %d] talerzyk kolor=%s ryby=%d cena=%d\n",
+                "[KLIENT %d] zjadlem talerzyk kolor=%s ryby=%d cena=%d\n",
                 getpid(),
                 nazwy_kolorow[t.kolor],
                 t.ilosc_ryb,
                 t.cena
             );
-        } else {
-            printf("[KUCHARZ %d] tasma pelna, czekam\n", getpid());
         }
 
         unlock(sem);
     }
+
+    printf(
+        "[KLIENT %d] koncze jedzenie, rachunek=%d\n",
+        getpid(),
+        rachunek
+    );
 
     return 0;
 }
