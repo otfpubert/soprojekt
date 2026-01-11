@@ -4,19 +4,8 @@
 #include <sys/ipc.h>
 #include <sys/shm.h>
 #include <sys/sem.h>
-#include <errno.h>
 
-#define P 5
-#define KOLORY 3
 #define SEGMENTY 20
-
-const char *nazwy_kolorow[KOLORY] = {
-    "niebieski",
-    "czerwony",
-    "zielony"
-};
-
-int ceny[KOLORY] = {10, 15, 20};
 
 struct talerzyk {
     int kolor;
@@ -36,8 +25,6 @@ struct tasma {
 struct restauracja {
     int otwarta;
     struct tasma tasma;
-    int wyprodukowane[KOLORY];
-    int sprzedane[KOLORY];
 };
 
 void lock(int sem) {
@@ -51,25 +38,39 @@ void unlock(int sem) {
 }
 
 int main() {
-    srand(getpid());
-
     key_t key = ftok("ipc_keyfile", 'R');
     int shm = shmget(key, sizeof(struct restauracja), 0);
     int sem = semget(key, 1, 0);
 
     if (shm == -1 || sem == -1) {
-        perror("kucharz ipc");
+        perror("tasma ipc");
         exit(1);
     }
 
     struct restauracja *r = shmat(shm, NULL, 0);
-    if (r == (void*)-1) { perror("shmat"); exit(1); }
+    if (r == (void*)-1) {
+        perror("shmat");
+        exit(1);
+    }
 
-    printf("[KUCHARZ %d] start procesu kucharza\n", getpid());
+    printf("[TASMA] start procesu tasmy\n");
 
     while (r->otwarta) {
-        sleep(4);
+        sleep(3);
 
+        lock(sem);
+
+        struct segment_tasmy tmp[SEGMENTY];
+
+        for (int i = 0; i < SEGMENTY; i++) {
+            tmp[i] = r->tasma.seg[i];
+        }
+
+        for (int i = 0; i < SEGMENTY; i++) {
+            r->tasma.seg[(i + 1) % SEGMENTY] = tmp[i];
+        }
+
+        unlock(sem);
     }
 
     return 0;

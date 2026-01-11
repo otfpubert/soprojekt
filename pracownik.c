@@ -6,7 +6,7 @@
 #include <sys/sem.h>
 #include <errno.h>
 
-#define P 5
+#define SEGMENTY 20
 #define KOLORY 3
 
 const char *nazwy_kolorow[KOLORY] = {
@@ -21,11 +21,13 @@ struct talerzyk {
     int ilosc_ryb;
 };
 
+struct segment_tasmy {
+    int zajety;
+    struct talerzyk t;
+};
+
 struct tasma {
-    struct talerzyk buf[P];
-    int head;
-    int tail;
-    int count;
+    struct segment_tasmy seg[SEGMENTY];
 };
 
 struct restauracja {
@@ -37,20 +39,16 @@ struct restauracja {
 
 void lock(int sem) {
     struct sembuf sb = {0, -1, 0};
-    if (semop(sem, &sb, 1) == -1)
-        perror("semop lock");
+    semop(sem, &sb, 1);
 }
 
 void unlock(int sem) {
     struct sembuf sb = {0, 1, 0};
-    if (semop(sem, &sb, 1) == -1)
-        perror("semop unlock");
+    semop(sem, &sb, 1);
 }
 
 int main() {
     key_t key = ftok("ipc_keyfile", 'R');
-    if (key == -1) { perror("ftok"); exit(1); }
-
     int shm = shmget(key, sizeof(struct restauracja), 0);
     int sem = semget(key, 1, 0);
 
@@ -68,26 +66,13 @@ int main() {
         sleep(2);
 
         lock(sem);
-
-        printf(
-            "[PRACOWNIK %d] na tasmie %d/%d talerzykow:\n",
-            getpid(),
-            r->tasma.count,
-            P
-        );
-
-        int idx = r->tasma.head;
-        for (int i = 0; i < r->tasma.count; i++) {
-            struct talerzyk t = r->tasma.buf[idx];
-            printf(
-                "  -> kolor=%s ryby=%d cena=%d\n",
-                nazwy_kolorow[t.kolor],
-                t.ilosc_ryb,
-                t.cena
-            );
-            idx = (idx + 1) % P;
+        printf("[PRACOWNIK] podglad tasmy:\n");
+        for (int i = 0; i < SEGMENTY; i++) {
+            if (r->tasma.seg[i].zajety)
+                printf("  [%02d] TALERZ\n", i);
+            else
+                printf("  [%02d] ---\n", i);
         }
-
         unlock(sem);
     }
 
