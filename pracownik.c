@@ -29,7 +29,7 @@ int main() {
         exit(1);
     }
 
-    printf("[PRACOWNIK %d] start procesu podgladu tasmy\n", getpid());
+    printf("[PRACOWNIK %d] start procesu pracownika\n", getpid());
 
     while (r->otwarta) {
         sleep(2);
@@ -38,33 +38,41 @@ int main() {
 
         printf("\n[PRACOWNIK] PODGLAD TASMY:\n");
 
-        for (int i = 0; i < SEGMENTY; i++) {
+        for (int seg = 0; seg < SEGMENTY; seg++) {
 
-            if (i == 0) {
-                printf(" [%02d] KUCHARZ | ", i);
-            } else if (i >= 1 && i <= 9) {
-                printf(" [%02d] LADA 0/1 | ", i);
-            } else {
-                int nr_stolika = i - 10;
+            if (seg == 0) {
+                printf(" [%02d] KUCHARZ | ", seg);
+            }
+            else if (seg >= 1 && seg <= 9) {
+                int idx = seg - 1; 
                 printf(
-                    " [%02d] STOLIK %d/%d | ",
-                    i,
-                    r->stoliki[nr_stolika].ile_osob,
-                    POJEMNOSC_STOLIKA
+                    " [%02d] LADA %d/1 | ",
+                    seg,
+                    r->lada[idx].zajete
+                );
+            }
+            else {
+                int idx = seg - 10;
+                printf(
+                    " [%02d] STOLIK %d/4 | ",
+                    seg,
+                    r->stoliki[idx].ile_osob
                 );
             }
 
-            if (r->tasma.seg[i].zajety) {
-                struct talerzyk t = r->tasma.seg[i].t;
+            if (r->tasma.seg[seg].zajety) {
+                struct talerzyk t = r->tasma.seg[seg].t;
                 printf(
-                    "%s ryby=%d cena=%d\n",
+                    "%s ryby=%d cena=%d",
                     nazwy_kolorow[t.kolor],
                     t.ilosc_ryb,
                     t.cena
                 );
             } else {
-                printf("---\n");
+                printf("---");
             }
+
+            printf("\n");
         }
 
         unlock(sem);
