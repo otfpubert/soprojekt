@@ -4,52 +4,28 @@
 #include <sys/ipc.h>
 #include <sys/shm.h>
 #include <sys/sem.h>
+#include <errno.h>
 
-#define SEGMENTY 20
-
-struct talerzyk {
-    int kolor;
-    int cena;
-    int ilosc_ryb;
-};
-
-struct segment_tasmy {
-    int zajety;
-    struct talerzyk t;
-};
-
-struct tasma {
-    struct segment_tasmy seg[SEGMENTY];
-};
-
-struct restauracja {
-    int otwarta;
-    struct tasma tasma;
-};
-
-void lock(int sem) {
-    struct sembuf sb = {0, -1, 0};
-    semop(sem, &sb, 1);
-}
-
-void unlock(int sem) {
-    struct sembuf sb = {0, 1, 0};
-    semop(sem, &sb, 1);
-}
+#include "wspolne.h"
 
 int main() {
     key_t key = ftok("ipc_keyfile", 'R');
+    if (key == -1) {
+        perror("[TASMA] ftok");
+        exit(1);
+    }
+
     int shm = shmget(key, sizeof(struct restauracja), 0);
     int sem = semget(key, 1, 0);
 
     if (shm == -1 || sem == -1) {
-        perror("tasma ipc");
+        perror("[TASMA] ipc");
         exit(1);
     }
 
     struct restauracja *r = shmat(shm, NULL, 0);
     if (r == (void*)-1) {
-        perror("shmat");
+        perror("[TASMA] shmat");
         exit(1);
     }
 
@@ -73,5 +49,6 @@ int main() {
         unlock(sem);
     }
 
+    shmdt(r);
     return 0;
 }

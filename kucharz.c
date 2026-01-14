@@ -5,72 +5,83 @@
 #include <sys/shm.h>
 #include <sys/sem.h>
 #include <errno.h>
+#include <time.h>
 
-#define P 5
-#define KOLORY 3
-#define SEGMENTY 20
-
-const char *nazwy_kolorow[KOLORY] = {
-    "niebieski",
-    "czerwony",
-    "zielony"
-};
-
-int ceny[KOLORY] = {10, 15, 20};
-
-struct talerzyk {
-    int kolor;
-    int cena;
-    int ilosc_ryb;
-};
-
-struct segment_tasmy {
-    int zajety;
-    struct talerzyk t;
-};
-
-struct tasma {
-    struct segment_tasmy seg[SEGMENTY];
-};
-
-struct restauracja {
-    int otwarta;
-    struct tasma tasma;
-    int wyprodukowane[KOLORY];
-    int sprzedane[KOLORY];
-};
-
-void lock(int sem) {
-    struct sembuf sb = {0, -1, 0};
-    semop(sem, &sb, 1);
-}
-
-void unlock(int sem) {
-    struct sembuf sb = {0, 1, 0};
-    semop(sem, &sb, 1);
-}
+#include "wspolne.h"
 
 int main() {
-    srand(getpid());
+    srand(getpid() ^ time(NULL));
 
     key_t key = ftok("ipc_keyfile", 'R');
+    if (key == -1) {
+        perror("[KUCHARZ] ftok");
+        exit(1);
+    }
+
     int shm = shmget(key, sizeof(struct restauracja), 0);
     int sem = semget(key, 1, 0);
 
     if (shm == -1 || sem == -1) {
-        perror("kucharz ipc");
+        perror("[KUCHARZ] ipc");
         exit(1);
     }
 
     struct restauracja *r = shmat(shm, NULL, 0);
-    if (r == (void*)-1) { perror("shmat"); exit(1); }
+    if (r == (void*)-1) {
+        perror("[KUCHARZ] shmat");
+        exit(1);
+    }
 
     printf("[KUCHARZ %d] start procesu kucharza\n", getpid());
 
     while (r->otwarta) {
+
         sleep(4);
 
+        int k = rand() % KOLORY;
+        struct talerzyk nowy;
+        nowy.kolor = k;
+        nowy.cena = ceny[k];
+        nowy.ilosc_ryb = (rand() % 2) + 1;
+
+        printf(
+            "[KUCHARZ %d] przygotowalem talerzyk: kolor=%s ryby=%d cena=%d\n",
+            getpid(),
+            nazwy_kolorow[k],
+            nowy.ilosc_ryb,
+            nowy.cena
+        );
+
+        int polozony = 0;
+
+        while (r->otwarta && !polozony) {
+            lock(sem);
+
+            if (!r->tasma.seg[0].zajety) {
+                r->tasma.seg[0].zajety = 1;
+                r->tasma.seg[0].t = nowy;
+                r->wyprodukowane[k]++;
+
+                printf(
+                    "[KUCHARZ %d] polozylem talerzyk na segmencie 0\n",
+                    getpid()
+                );
+
+                polozony = 1;
+            }
+
+            unlock(sem);
+
+            if (!polozony) {
+                printf(
+                    "[KUCHARZ %d] segment 0 zajety, czekam\n",
+                    getpid()
+                );
+                sleep(1);
+            }
+        }
     }
 
+    shmdt(r);
     return 0;
 }
