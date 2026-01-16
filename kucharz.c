@@ -36,6 +36,7 @@ int main() {
 
     while (r->otwarta) {
 
+        /* tempo przygotowania potrawy */
         sleep(4);
 
         int k = rand() % KOLORY;
@@ -52,6 +53,7 @@ int main() {
             nowy.cena
         );
 
+        /* proba polozenia talerza na segmencie 0 */
         int polozony = 0;
 
         while (r->otwarta && !polozony) {

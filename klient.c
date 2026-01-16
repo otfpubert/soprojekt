@@ -41,36 +41,56 @@ int main() {
 
     printf("[KLIENT %d] start procesu klienta\n", getpid());
 
-    int moj_segment;
-    int typ_miejsca; /* 0 = lada, 1 = stolik */
-    int idx_miejsca;
+    int moj_segment = -1;
+    int typ_miejsca = -1; /* 0 = lada, 1 = stolik */
+    int idx_miejsca = -1;
 
-    lock(sem);
+    /* ===== PROBA ZAJECIA MIEJSCA ===== */
+    while (r->otwarta && moj_segment == -1) {
+        lock(sem);
 
-    if (rand() % 2 == 0) {
-        idx_miejsca = rand() % LADA_MIEJSC;
-        moj_segment = r->lada[idx_miejsca].segment;
-        r->lada[idx_miejsca].zajete = 1;
-        typ_miejsca = 0;
+        if (rand() % 2 == 0) {
+            /* proba lady */
+            int idx = rand() % LADA_MIEJSC;
+            if (r->lada[idx].zajete == 0) {
+                r->lada[idx].zajete = 1;
+                moj_segment = r->lada[idx].segment;
+                idx_miejsca = idx;
+                typ_miejsca = 0;
 
-        printf(
-            "[KLIENT %d] zajmuje miejsce przy ladzie (segment %d)\n",
-            getpid(), moj_segment
-        );
-    } else {
-        idx_miejsca = rand() % STOLIKI;
-        moj_segment = r->stoliki[idx_miejsca].segment;
-        r->stoliki[idx_miejsca].ile_osob = 1;
-        typ_miejsca = 1;
+                printf(
+                    "[KLIENT %d] zajmuje miejsce przy ladzie (segment %d)\n",
+                    getpid(), moj_segment
+                );
+            }
+        } else {
+            /* proba stolika */
+            int idx = rand() % STOLIKI;
+            if (r->stoliki[idx].ile_osob < 4) {
+                r->stoliki[idx].ile_osob++;
+                moj_segment = r->stoliki[idx].segment;
+                idx_miejsca = idx;
+                typ_miejsca = 1;
 
-        printf(
-            "[KLIENT %d] zajmuje miejsce przy stoliku (segment %d)\n",
-            getpid(), moj_segment
-        );
+                printf(
+                    "[KLIENT %d] zajmuje miejsce przy stoliku (segment %d) (%d/4)\n",
+                    getpid(), moj_segment, r->stoliki[idx].ile_osob
+                );
+            }
+        }
+
+        unlock(sem);
+
+        if (moj_segment == -1) {
+            printf(
+                "[KLIENT %d] brak wolnego miejsca, czekam\n",
+                getpid()
+            );
+            sleep(2);
+        }
     }
 
-    unlock(sem);
-
+    /* ===== JEDZENIE ===== */
     int zjedzone = 0;
     int do_zjedzenia = 3 + rand() % 8;
 
@@ -86,7 +106,8 @@ int main() {
 
         if (r->tasma.seg[moj_segment].zajety) {
 
-            if (rand() % 100 < 20) { 
+            /* je tylko czasami */
+            if (rand() % 100 < 20) {
                 struct talerzyk t = r->tasma.seg[moj_segment].t;
                 r->tasma.seg[moj_segment].zajety = 0;
                 r->sprzedane[t.kolor]++;
@@ -104,6 +125,7 @@ int main() {
 
                 unlock(sem);
 
+                /* przerwa zeby nie wpierdalal wszystkiego */
                 sleep(2 + rand() % 3);
                 continue;
             }
@@ -117,11 +139,13 @@ int main() {
         getpid()
     );
 
+    /* ===== ZWALNIANIE MIEJSCA ===== */
     lock(sem);
-    if (typ_miejsca == 0)
+    if (typ_miejsca == 0) {
         r->lada[idx_miejsca].zajete = 0;
-    else
-        r->stoliki[idx_miejsca].ile_osob = 0;
+    } else if (typ_miejsca == 1) {
+        r->stoliki[idx_miejsca].ile_osob--;
+    }
     unlock(sem);
 
     shmdt(r);

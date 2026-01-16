@@ -4,11 +4,11 @@
 #include <sys/ipc.h>
 #include <sys/shm.h>
 #include <sys/sem.h>
-#include <sys/wait.h>
 #include <time.h>
-#include <errno.h>
 
 #include "wspolne.h"
+
+#define LICZBA_GRUP 15
 
 int main() {
     printf("[MAIN] start programu\n");
@@ -39,30 +39,36 @@ int main() {
     }
 
     for (int i = 0; i < STOLIKI; i++) {
-        r->stoliki[i].zajete = 0;
         r->stoliki[i].ile_osob = 0;
         r->stoliki[i].segment = 10 + i;
     }
 
-    for (int i = 0; i < KOLORY; i++) {
-        r->wyprodukowane[i] = 0;
-        r->sprzedane[i] = 0;
-    }
+    for (int i = 0; i < MAX_KLIENTOW; i++)
+        r->klienci[i].aktywny = 0;
+
 
     printf("[MAIN] IPC gotowe, uruchamiam procesy\n");
 
     if (fork() == 0) execl("./kucharz", "kucharz", NULL);
     if (fork() == 0) execl("./pracownik", "pracownik", NULL);
-    if (fork() == 0) execl("./klient", "klient", NULL);
     if (fork() == 0) execl("./tasma", "tasma", NULL);
 
-    printf("[MAIN] restauracja dziala bezterminowo\n");
+    for (int g = 0; g < LICZBA_GRUP; g++) {
+        int rozmiar = 1 + rand() % 4;
 
-    while (1) {
+        for (int i = 0; i < rozmiar; i++) {
+            if (fork() == 0) {
+                char gid[8], gsize[8], lider[8];
+                sprintf(gid, "%d", g);
+                sprintf(gsize, "%d", rozmiar);
+                sprintf(lider, "%d", i == 0);
+
+                execl("./klient", "klient", gid, gsize, lider, NULL);
+                exit(1);
+            }
+        }
         sleep(1);
     }
-  
 
-    return 0;
+    while (1) sleep(1);
 }
-

@@ -2,6 +2,7 @@
 #define WSPOLNE_H
 
 #include <sys/sem.h>
+#include <sys/types.h>
 
 #define PRAWA 0600
 
@@ -11,6 +12,9 @@
 #define LADA_MIEJSC 9
 #define STOLIKI 10
 #define POJEMNOSC_STOLIKA 4
+
+#define MAX_KLIENTOW 64
+#define MAX_GRUP     32
 
 static const char *nazwy_kolorow[KOLORY] = {
     "niebieski",
@@ -35,23 +39,37 @@ struct tasma {
     struct segment_tasmy seg[SEGMENTY];
 };
 
+struct klient_info {
+    pid_t pid;
+    int id_grupy;
+    int segment;      
+    int zjedzone;
+    int limit;
+    int aktywny;
+};
+
 struct miejsce_lada {
     int zajete;
     int segment;
 };
 
 struct stolik {
-    int zajete;
     int ile_osob;
     int segment;
 };
 
 struct restauracja {
     int otwarta;
+
     struct tasma tasma;
 
     struct miejsce_lada lada[LADA_MIEJSC];
     struct stolik stoliki[STOLIKI];
+
+    struct klient_info klienci[MAX_KLIENTOW];
+
+    int segmenty_grupy[MAX_GRUP][POJEMNOSC_STOLIKA];
+    int rozmiar_grupy[MAX_GRUP];
 
     int wyprodukowane[KOLORY];
     int sprzedane[KOLORY];
