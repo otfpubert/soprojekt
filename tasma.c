@@ -9,7 +9,7 @@
 #include "wspolne.h"
 
 int main() {
-    key_t key = ftok("ipc_keyfile", 'R');
+    key_t key = ftok("ipc_keyfile", 'Z');
     if (key == -1) {
         perror("[TASMA] ftok");
         exit(1);
@@ -32,7 +32,7 @@ int main() {
     printf("[TASMA] start procesu tasmy\n");
 
     while (r->otwarta) {
-        sleep(3);
+        sleep(1);
 
         lock(sem);
 

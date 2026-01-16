@@ -9,138 +9,73 @@
 #include "wspolne.h"
 
 int main() {
-    key_t key = ftok("ipc_keyfile", 'R');
-    if (key == -1) {
-        perror("[PRACOWNIK] ftok");
-        exit(1);
-    }
+    key_t key = ftok("ipc_keyfile", 'Z');
+    if (key == -1) exit(1);
 
     int shm = shmget(key, sizeof(struct restauracja), 0);
     int sem = semget(key, 1, 0);
-    if (shm == -1 || sem == -1) {
-        perror("[PRACOWNIK] ipc");
-        exit(1);
-    }
+    if (shm == -1 || sem == -1) exit(1);
 
     struct restauracja *r = shmat(shm, NULL, 0);
-    if (r == (void*)-1) {
-        perror("[PRACOWNIK] shmat");
-        exit(1);
-    }
-
-    printf("[PRACOWNIK %d] start procesu pracownika\n", getpid());
+    if (r == (void*)-1) exit(1);
 
     while (r->otwarta) {
-        sleep(2);
+        system("clear");
         lock(sem);
 
-        printf("\n[PRACOWNIK] PODGLAD TASMY:\n");
+        printf("\n=== PODGLAD RESTAURACJI (Odswiezanie co 2s) ===\n");
+        printf("---------------------------------------------------------------------------------\n");
+        printf("| SEG |       MIEJSCE       |          NA TASMIE           |      KLIENCI       \n");
+        printf("---------------------------------------------------------------------------------\n");
 
         for (int seg = 0; seg < SEGMENTY; seg++) {
+            printf("| %02d  | ", seg);
 
+            char bufor_miejsca[30];
+            
             if (seg == 0) {
-                printf(" [%02d] KUCHARZ | ", seg);
+                sprintf(bufor_miejsca, "KUCHARZ");
             }
             else if (seg >= 1 && seg <= 9) {
                 int idx = seg - 1;
-                printf(
-                    " [%02d] LADA %d/1 | ",
-                    seg,
-                    r->lada[idx].zajete
-                );
+                sprintf(bufor_miejsca, "LADA %d %s", idx, r->lada[idx].zajete ? "(ZAJ)" : "(wol)");
             }
             else {
                 int idx = seg - 10;
-                printf(
-                    " [%02d] STOLIK %d/4 | ",
-                    seg,
-                    r->stoliki[idx].ile_osob
-                );
+                sprintf(bufor_miejsca, "STOL %d (%d/%d)", idx, r->stoliki[idx].ile_osob, r->stoliki[idx].pojemnosc);
             }
+            printf("%-18s | ", bufor_miejsca);
 
+            char bufor_jedzenia[30];
             if (r->tasma.seg[seg].zajety) {
                 struct talerzyk t = r->tasma.seg[seg].t;
-                printf(
-                    "%s ryby=%d cena=%d | ",
-                    nazwy_kolorow[t.kolor],
-                    t.ilosc_ryb,
-                    t.cena
-                );
+                sprintf(bufor_jedzenia, "%s ($%d)", nazwy_kolorow[t.kolor], t.cena);
             } else {
-                printf("--- | ");
+                sprintf(bufor_jedzenia, "---");
             }
+            printf("%-20s | ", bufor_jedzenia);
 
-            if (seg >= 1 && seg <= 9) {
-                int found = 0;
+            int found = 0;
+            if (seg > 0) { 
                 for (int i = 0; i < MAX_KLIENTOW; i++) {
                     struct klient_info *k = &r->klienci[i];
                     if (!k->aktywny) continue;
                     if (k->segment != seg) continue;
 
-                    printf(
-                        "PID=%d GRUPA=%d | %d/%d",
-                        k->pid,
-                        k->id_grupy,
-                        k->zjedzone,
-                        k->limit
-                    );
+                    if (found) printf(", ");
+                    printf("PID=%d G=%d (%d/%d)", k->pid, k->id_grupy, k->zjedzone, k->limit);
                     found = 1;
-                    break;
                 }
-                if (!found)
-                    printf("---");
-
-            } else if (seg >= 10) {
-                int pierwszy = 1;
-                int znaleziono = 0;
-
-                for (int i = 0; i < MAX_KLIENTOW; i++) {
-                    struct klient_info *k = &r->klienci[i];
-                    if (!k->aktywny) continue;
-                    if (k->segment != seg) continue;
-
-                    if (pierwszy) {
-                        printf("PID=");
-                        pierwszy = 0;
-                    } else {
-                        printf(",");
-                    }
-
-                    printf("%d", k->pid);
-                    znaleziono = 1;
-                }
-
-                if (!znaleziono) {
-                    printf("---");
-                } else {
-                    printf(" GRUPA=");
-                    for (int i = 0; i < MAX_KLIENTOW; i++) {
-                        struct klient_info *k = &r->klienci[i];
-                        if (k->aktywny && k->segment == seg) {
-                            printf("%d | ", k->id_grupy);
-                            break;
-                        }
-                    }
-
-                    pierwszy = 1;
-                    for (int i = 0; i < MAX_KLIENTOW; i++) {
-                        struct klient_info *k = &r->klienci[i];
-                        if (!k->aktywny) continue;
-                        if (k->segment != seg) continue;
-
-                        if (!pierwszy) printf(",");
-                        printf("%d/%d", k->zjedzone, k->limit);
-                        pierwszy = 0;
-                    }
-                }
-            } else {
-                printf("---");
             }
-
             printf("\n");
         }
+        
+        printf("---------------------------------------------------------------------------------\n");
+        printf("Statystyki sprzedazy: Niebieski: %d, Czerwony: %d, Zielony: %d\n",
+            r->sprzedane[0], r->sprzedane[1], r->sprzedane[2]);
 
         unlock(sem);
+        sleep(5); 
     }
 
     shmdt(r);

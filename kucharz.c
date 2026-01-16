@@ -12,7 +12,7 @@
 int main() {
     srand(getpid() ^ time(NULL));
 
-    key_t key = ftok("ipc_keyfile", 'R');
+    key_t key = ftok("ipc_keyfile", 'Z');
     if (key == -1) {
         perror("[KUCHARZ] ftok");
         exit(1);
@@ -36,8 +36,7 @@ int main() {
 
     while (r->otwarta) {
 
-        /* tempo przygotowania potrawy */
-        sleep(4);
+        sleep(5);
 
         int k = rand() % KOLORY;
         struct talerzyk nowy;
@@ -53,7 +52,6 @@ int main() {
             nowy.cena
         );
 
-        /* proba polozenia talerza na segmencie 0 */
         int polozony = 0;
 
         while (r->otwarta && !polozony) {
