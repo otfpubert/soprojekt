@@ -3,30 +3,32 @@
 
 #include <sys/sem.h>
 #include <sys/types.h>
+#include <stdio.h>
 
 #define PRAWA 0600
 
 #define SEGMENTY 20
-#define KOLORY 3
+#define KOLORY 6 
 
 #define LADA_MIEJSC 9
 #define STOLIKI 10
 
 #define MAX_KLIENTOW 200
 #define MAX_GRUP     100
+#define MAX_ZAMOWIEN 50
 
 static const char *nazwy_kolorow[KOLORY] = {
-    "niebieski",
-    "czerwony",
-    "zielony"
+    "NIEBIESKI", "CZERWONY", "ZIELONY", 
+    "BRAZOWY",   "SREBRNY",  "ZLOTY"
 };
 
-static const int ceny[KOLORY] = {10, 15, 20};
+static const int ceny[KOLORY] = {10, 15, 20, 40, 50, 60};
 
 struct talerzyk {
     int kolor;
     int cena;
     int ilosc_ryb;
+    int id_odbiorcy;
 };
 
 struct segment_tasmy {
@@ -45,6 +47,7 @@ struct klient_info {
     int zjedzone;
     int limit;
     int aktywny;
+    int czeka_na_specjalne;
 };
 
 struct miejsce_lada {
@@ -59,6 +62,12 @@ struct stolik {
     int id_grupy;
 };
 
+struct zamowienie {
+    pid_t pid_klienta;
+    int typ_dania;
+    int aktywne;
+};
+
 struct restauracja {
     int otwarta;
 
@@ -70,6 +79,11 @@ struct restauracja {
     int grupa_zjedzone_cnt[MAX_GRUP];
     int gdzie_siedzimy[MAX_GRUP];
     int typ_miejsca_grupy[MAX_GRUP];
+
+    struct zamowienie zamowienia[MAX_ZAMOWIEN];
+    
+    // TWEAK: Jedno pole na ostatni wazny komunikat
+    char info[200]; 
 
     int wyprodukowane[KOLORY];
     int sprzedane[KOLORY];

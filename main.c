@@ -9,13 +9,13 @@
 
 #include "wspolne.h"
 
-#define LICZBA_GRUP 40 
+#define LICZBA_GRUP 50
 
 int main() {
     printf("[MAIN] Start systemu (MAX_GRUP=%d)\n", MAX_GRUP);
     srand(time(NULL));
 
-    key_t key = ftok("ipc_keyfile", 'Z');
+    key_t key = ftok("ipc_keyfile", 'R');
     if (key == -1) { perror("ftok"); exit(1); }
 
     int shm = shmget(key, sizeof(struct restauracja), IPC_CREAT | PRAWA);
@@ -30,6 +30,8 @@ int main() {
     if (r == (void*)-1) { perror("shmat"); exit(1); }
 
     r->otwarta = 1;
+    
+    sprintf(r->info, "Oczekiwanie na zamowienia...");
 
     for (int i = 0; i < MAX_GRUP; i++) {
         r->grupa_zjedzone_cnt[i] = 0;
@@ -42,6 +44,10 @@ int main() {
     for (int i = 0; i < LADA_MIEJSC; i++) {
         r->lada[i].zajete = 0;
         r->lada[i].segment = i + 1;
+    }
+
+    for (int i = 0; i < MAX_ZAMOWIEN; i++) {
+        r->zamowienia[i].aktywne = 0;
     }
 
     for (int i = 0; i < STOLIKI; i++) {

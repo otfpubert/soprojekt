@@ -9,33 +9,29 @@
 #include "wspolne.h"
 
 int main() {
-    key_t key = ftok("ipc_keyfile", 'Z');
+    key_t key = ftok("ipc_keyfile", 'R');
     if (key == -1) exit(1);
-
     int shm = shmget(key, sizeof(struct restauracja), 0);
     int sem = semget(key, 1, 0);
     if (shm == -1 || sem == -1) exit(1);
-
     struct restauracja *r = shmat(shm, NULL, 0);
-    if (r == (void*)-1) exit(1);
+
+    printf("[PRACOWNIK] Start monitora\n");
 
     while (r->otwarta) {
         system("clear");
         lock(sem);
 
         printf("\n=== PODGLAD RESTAURACJI (Odswiezanie co 2s) ===\n");
-        printf("---------------------------------------------------------------------------------\n");
-        printf("| SEG |       MIEJSCE       |          NA TASMIE           |      KLIENCI       \n");
-        printf("---------------------------------------------------------------------------------\n");
+        printf("------------------------------------------------------------------------------------------------\n");
+        printf("| SEG |       MIEJSCE       |          NA TASMIE           |             KLIENCI                \n");
+        printf("------------------------------------------------------------------------------------------------\n");
 
         for (int seg = 0; seg < SEGMENTY; seg++) {
             printf("| %02d  | ", seg);
 
             char bufor_miejsca[30];
-            
-            if (seg == 0) {
-                sprintf(bufor_miejsca, "KUCHARZ");
-            }
+            if (seg == 0) sprintf(bufor_miejsca, "KUCHARZ");
             else if (seg >= 1 && seg <= 9) {
                 int idx = seg - 1;
                 sprintf(bufor_miejsca, "LADA %d %s", idx, r->lada[idx].zajete ? "(ZAJ)" : "(wol)");
@@ -46,10 +42,14 @@ int main() {
             }
             printf("%-18s | ", bufor_miejsca);
 
-            char bufor_jedzenia[30];
+            char bufor_jedzenia[40];
             if (r->tasma.seg[seg].zajety) {
                 struct talerzyk t = r->tasma.seg[seg].t;
-                sprintf(bufor_jedzenia, "%s ($%d)", nazwy_kolorow[t.kolor], t.cena);
+                if (t.id_odbiorcy != -1) {
+                    sprintf(bufor_jedzenia, "%s($%d)->%d", nazwy_kolorow[t.kolor], t.cena, t.id_odbiorcy);
+                } else {
+                    sprintf(bufor_jedzenia, "%s ($%d)", nazwy_kolorow[t.kolor], t.cena);
+                }
             } else {
                 sprintf(bufor_jedzenia, "---");
             }
@@ -63,19 +63,24 @@ int main() {
                     if (k->segment != seg) continue;
 
                     if (found) printf(", ");
-                    printf("PID=%d G=%d (%d/%d)", k->pid, k->id_grupy, k->zjedzone, k->limit);
+                    // Zmienione: Gwiazdka (*) zamiast [VIP] jesli czeka na specjalne
+                    printf("PID=%d%s G=%d (%d/%d)", k->pid, k->czeka_na_specjalne ? "*" : "", k->id_grupy, k->zjedzone, k->limit);
                     found = 1;
                 }
             }
             printf("\n");
         }
         
-        printf("---------------------------------------------------------------------------------\n");
-        printf("Statystyki sprzedazy: Niebieski: %d, Czerwony: %d, Zielony: %d\n",
-            r->sprzedane[0], r->sprzedane[1], r->sprzedane[2]);
+        printf("------------------------------------------------------------------------------------------------\n");
+        printf("SPRZEDAZ: Nieb:%d Czer:%d Ziel:%d | BRAZ:%d SREB:%d ZLOT:%d\n",
+            r->sprzedane[0], r->sprzedane[1], r->sprzedane[2],
+            r->sprzedane[3], r->sprzedane[4], r->sprzedane[5]);
+        
+        printf("\n[INFO]: %s\n", r->info);
+        printf("====================================================\n");
 
         unlock(sem);
-        sleep(5); 
+        sleep(2); 
     }
 
     shmdt(r);
