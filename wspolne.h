@@ -3,6 +3,7 @@
 
 #include <sys/sem.h>
 #include <sys/types.h>
+#include <sys/msg.h> 
 #include <stdio.h>
 
 #define PRAWA 0600
@@ -13,9 +14,17 @@
 #define LADA_MIEJSC 9
 #define STOLIKI 10
 
-#define MAX_KLIENTOW 200
+#define MAX_KLIENTOW 200 
 #define MAX_GRUP     100
 #define MAX_ZAMOWIEN 50
+
+struct komunikat {
+    long mtype;       
+    pid_t pid_nadawcy;
+    int rozmiar_grupy;
+    int numer_miejsca; 
+    int typ_miejsca;   
+};
 
 static const char *nazwy_kolorow[KOLORY] = {
     "NIEBIESKI", "CZERWONY", "ZIELONY", 
@@ -59,7 +68,7 @@ struct stolik {
     int ile_osob;
     int pojemnosc;
     int segment;
-    int id_grupy;
+    int id_grupy; 
 };
 
 struct zamowienie {
@@ -77,12 +86,11 @@ struct restauracja {
     struct klient_info klienci[MAX_KLIENTOW];
 
     int grupa_zjedzone_cnt[MAX_GRUP];
-    int gdzie_siedzimy[MAX_GRUP];
+    
+    int gdzie_siedzimy[MAX_GRUP]; 
     int typ_miejsca_grupy[MAX_GRUP];
 
     struct zamowienie zamowienia[MAX_ZAMOWIEN];
-    
-    // TWEAK: Jedno pole na ostatni wazny komunikat
     char info[200]; 
 
     int wyprodukowane[KOLORY];

@@ -12,7 +12,7 @@
 int main() {
     srand(getpid() ^ time(NULL));
 
-    key_t key = ftok("ipc_keyfile", 'R');
+    key_t key = ftok("ipc_keyfile", 'Z');
     if (key == -1) exit(1);
     int shm = shmget(key, sizeof(struct restauracja), 0);
     int sem = semget(key, 1, 0);
