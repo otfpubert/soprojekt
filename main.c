@@ -53,17 +53,43 @@ int main() {
 
     printf("[MAIN] Start procesow...\n");
     if (fork() == 0) { execl("./kucharz", "kucharz", NULL); exit(0); }
-    if (fork() == 0) { execl("./obsluga", "obsluga", NULL); exit(0); } // NOWA NAZWA
+    if (fork() == 0) { execl("./obsluga", "obsluga", NULL); exit(0); }
     if (fork() == 0) { execl("./tasma", "tasma", NULL); exit(0); }
 
     for (int g = 0; g < LICZBA_GRUP; g++) {
         int rozmiar = 1 + rand() % 4;
+        
+        int member_vip[rozmiar];
+        int member_child[rozmiar];
+        int group_has_priority = 0;
+
+        for(int k=0; k<rozmiar; k++) {
+            if (rand() % 100 < 2) {
+                member_vip[k] = 1;
+                group_has_priority = 1; 
+            } else {
+                member_vip[k] = 0;
+            }
+
+            if (k > 0 && rand() % 100 < 10) {
+                member_child[k] = 1;
+            } else {
+                member_child[k] = 0;
+            }
+        }
+
         for (int i = 0; i < rozmiar; i++) {
             if (fork() == 0) {
                 char gid[10], gsize[10];
+                char my_vip[5], my_child[5], grp_prio[5];
+                
                 sprintf(gid, "%d", g);
                 sprintf(gsize, "%d", rozmiar);
-                execl("./klient", "klient", gid, gsize, NULL);
+                sprintf(my_vip, "%d", member_vip[i]);     
+                sprintf(grp_prio, "%d", group_has_priority); 
+                sprintf(my_child, "%d", member_child[i]);  
+
+                execl("./klient", "klient", gid, gsize, my_vip, grp_prio, my_child, NULL);
                 exit(1);
             }
         }

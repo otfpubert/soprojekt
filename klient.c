@@ -15,10 +15,19 @@ int main(int argc, char *argv[]) {
 
     int moj_gid = 0;
     int moja_grupa_size = 1;
-    if (argc >= 3) {
+    
+    int ja_jestem_vip = 0;
+    int moja_grupa_ma_priorytet = 0;
+    int ja_jestem_dziecko = 0;
+
+    if (argc >= 6) {
         moj_gid = atoi(argv[1]);
         moja_grupa_size = atoi(argv[2]);
+        ja_jestem_vip = atoi(argv[3]);
+        moja_grupa_ma_priorytet = atoi(argv[4]);
+        ja_jestem_dziecko = atoi(argv[5]);
     }
+    
     if (moj_gid >= MAX_GRUP) exit(1);
 
     key_t key = ftok("ipc_keyfile", 'Z');
@@ -39,18 +48,22 @@ int main(int argc, char *argv[]) {
             r->klienci[i].limit = do_zjedzenia;
             r->klienci[i].zjedzone = 0;
             r->klienci[i].segment = -1; 
+            r->klienci[i].is_vip = ja_jestem_vip;
+            r->klienci[i].is_child = ja_jestem_dziecko;
+            
             moj_slot_idx = i;
             break;
         }
     }
     unlock(sem);
 
-    printf("[KLIENT %d] G=%d Osob=%d. Szukam miejsca...\n", getpid(), moj_gid, moja_grupa_size);
+    if(ja_jestem_vip) printf("[KLIENT %d] VIP z G=%d wchodzi!\n", getpid(), moj_gid);
+    else if(ja_jestem_dziecko) printf("[KLIENT %d] Dziecko z G=%d wchodzi!\n", getpid(), moj_gid);
+    else printf("[KLIENT %d] Klient z G=%d wchodzi.\n", getpid(), moj_gid);
 
     int moj_segment = -1;
     int typ_miejsca = -1;
     int idx_miejsca = -1;
-
     int jestem_liderem = 0;
 
     lock(sem);
@@ -65,6 +78,8 @@ int main(int argc, char *argv[]) {
         zapytanie.mtype = 1; 
         zapytanie.pid_nadawcy = getpid();
         zapytanie.rozmiar_grupy = moja_grupa_size;
+        zapytanie.group_priority = moja_grupa_ma_priorytet;
+        
         msgsnd(msg, &zapytanie, sizeof(struct komunikat) - sizeof(long), 0);
 
         struct komunikat odpowiedz;
@@ -72,14 +87,16 @@ int main(int argc, char *argv[]) {
 
         typ_miejsca = odpowiedz.typ_miejsca;
         idx_miejsca = odpowiedz.numer_miejsca;
+        
+        zrzut_do_logu("KLIENT PID=%d (G=%d): Otrzymalem miejsce nr %d (Typ: %d)", getpid(), moj_gid, idx_miejsca, typ_miejsca);
 
         lock(sem);
         r->typ_miejsca_grupy[moj_gid] = typ_miejsca;
         r->gdzie_siedzimy[moj_gid] = idx_miejsca; 
         
-        if (typ_miejsca == 0) { 
+        if (typ_miejsca == 0) {
             moj_segment = r->lada[idx_miejsca].segment;
-        } else { 
+        } else {
             moj_segment = r->stoliki[idx_miejsca].segment;
             r->stoliki[idx_miejsca].id_grupy = moj_gid;
         }
@@ -94,18 +111,14 @@ int main(int argc, char *argv[]) {
                 typ_miejsca = r->typ_miejsca_grupy[moj_gid];
                 
                 if (typ_miejsca == 0) { 
-                    if (moja_grupa_size == 2) {
-                        idx_miejsca = baza + 1; 
-                    } else {
-                        idx_miejsca = baza;
-                    }
+                    if (moja_grupa_size == 2) idx_miejsca = baza + 1;
+                    else idx_miejsca = baza;
                     moj_segment = r->lada[idx_miejsca].segment;
                 } 
-                else { // Stolik
+                else { 
                     idx_miejsca = baza;
                     moj_segment = r->stoliki[idx_miejsca].segment;
                 }
-                
                 unlock(sem);
                 break; 
             }
@@ -123,8 +136,8 @@ int main(int argc, char *argv[]) {
     
     while (r->otwarta && zjedzone < do_zjedzenia) {
         if (!oczekuje_na_specjalne) {
-            if (moj_segment > 15) { 
-                if (rand() % 5000 < moj_segment) { 
+            if (moj_segment > 15) {
+                if (!ja_jestem_dziecko && rand() % 5000 < moj_segment) {
                     lock(sem);
                     for(int i=0; i<MAX_ZAMOWIEN; i++) {
                         if(!r->zamowienia[i].aktywne) {
@@ -185,6 +198,7 @@ int main(int argc, char *argv[]) {
     lock(sem);
     if (typ_miejsca == 0) {
         r->lada[idx_miejsca].zajete = 0;
+        zrzut_do_logu("KLIENT PID=%d (G=%d): Zwolnilem LADE nr %d", getpid(), moj_gid, idx_miejsca);
         if (r->grupa_zjedzone_cnt[moj_gid] >= moja_grupa_size) {
              r->gdzie_siedzimy[moj_gid] = -1;
         }
@@ -193,6 +207,7 @@ int main(int argc, char *argv[]) {
         if (r->stoliki[idx_miejsca].ile_osob == 0) {
             r->stoliki[idx_miejsca].id_grupy = -1;
             r->gdzie_siedzimy[moj_gid] = -1; 
+            zrzut_do_logu("KLIENT PID=%d (G=%d): Zwolnilem STOLIK nr %d (Typ: 1)", getpid(), moj_gid, idx_miejsca);
         }
     }
     if (moj_slot_idx != -1) r->klienci[moj_slot_idx].aktywny = 0;

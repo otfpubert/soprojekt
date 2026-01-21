@@ -3,8 +3,11 @@
 
 #include <sys/sem.h>
 #include <sys/types.h>
-#include <sys/msg.h> 
+#include <sys/msg.h>
 #include <stdio.h>
+#include <string.h>
+#include <time.h>
+#include <stdarg.h> 
 
 #define PRAWA 0600
 
@@ -19,15 +22,17 @@
 #define MAX_ZAMOWIEN 50
 
 struct komunikat {
-    long mtype;       
+    long mtype;
     pid_t pid_nadawcy;
     int rozmiar_grupy;
-    int numer_miejsca; 
-    int typ_miejsca;   
+    int numer_miejsca;
+    int typ_miejsca;
+    
+    int group_priority;     
 };
 
 static const char *nazwy_kolorow[KOLORY] = {
-    "NIEBIESKI", "CZERWONY", "ZIELONY", 
+    "niebieski", "czerwony", "zielony", 
     "BRAZOWY",   "SREBRNY",  "ZLOTY"
 };
 
@@ -57,6 +62,9 @@ struct klient_info {
     int limit;
     int aktywny;
     int czeka_na_specjalne;
+    
+    int is_vip;   
+    int is_child; 
 };
 
 struct miejsce_lada {
@@ -68,7 +76,7 @@ struct stolik {
     int ile_osob;
     int pojemnosc;
     int segment;
-    int id_grupy; 
+    int id_grupy;
 };
 
 struct zamowienie {
@@ -86,8 +94,7 @@ struct restauracja {
     struct klient_info klienci[MAX_KLIENTOW];
 
     int grupa_zjedzone_cnt[MAX_GRUP];
-    
-    int gdzie_siedzimy[MAX_GRUP]; 
+    int gdzie_siedzimy[MAX_GRUP];
     int typ_miejsca_grupy[MAX_GRUP];
 
     struct zamowienie zamowienia[MAX_ZAMOWIEN];
@@ -105,6 +112,28 @@ static inline void lock(int sem) {
 static inline void unlock(int sem) {
     struct sembuf sb = {0, 1, 0};
     semop(sem, &sb, 1);
+}
+
+static inline void zrzut_do_logu(const char *format, ...) {
+    FILE *f = fopen("debug.log", "a");
+    if (f == NULL) return;
+    
+    time_t now; 
+    time(&now);
+    char *date = ctime(&now);
+    if (date != NULL && strlen(date) > 0) {
+        date[strlen(date) - 1] = '\0'; 
+    }
+    
+    fprintf(f, "[%s] ", date ? date : "UNKNOWN");
+    
+    va_list args;
+    va_start(args, format);
+    vfprintf(f, format, args);
+    va_end(args);
+    
+    fprintf(f, "\n");
+    fclose(f);
 }
 
 #endif

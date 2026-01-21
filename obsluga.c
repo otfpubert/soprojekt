@@ -9,27 +9,59 @@
 
 #include "wspolne.h"
 
-#define Q_SIZE 100
-pid_t queue_g1[Q_SIZE]; int q1_cnt = 0;
-pid_t queue_g2[Q_SIZE]; int q2_cnt = 0;
-pid_t queue_g3[Q_SIZE]; int q3_cnt = 0;
-pid_t queue_g4[Q_SIZE]; int q4_cnt = 0;
+typedef struct {
+    pid_t pid;
+    int group_priority; 
+} wpis_kolejki;
 
-void dodaj_do_kolejki(int rozmiar, pid_t pid) {
-    if (rozmiar == 1 && q1_cnt < Q_SIZE) queue_g1[q1_cnt++] = pid;
-    else if (rozmiar == 2 && q2_cnt < Q_SIZE) queue_g2[q2_cnt++] = pid;
-    else if (rozmiar == 3 && q3_cnt < Q_SIZE) queue_g3[q3_cnt++] = pid;
-    else if (rozmiar >= 4 && q4_cnt < Q_SIZE) queue_g4[q4_cnt++] = pid;
+#define Q_SIZE 100
+
+wpis_kolejki queue_g1[Q_SIZE]; int q1_cnt = 0;
+wpis_kolejki queue_g2[Q_SIZE]; int q2_cnt = 0;
+wpis_kolejki queue_g3[Q_SIZE]; int q3_cnt = 0;
+wpis_kolejki queue_g4[Q_SIZE]; int q4_cnt = 0;
+
+void wstaw_do_kolejki(wpis_kolejki *q, int *cnt, pid_t pid, int priority) {
+    if (*cnt >= Q_SIZE) return;
+
+    int idx_wstawienia = *cnt; 
+
+    if (priority) {
+        for (int i = 0; i < *cnt; i++) {
+            if (q[i].group_priority == 0) {
+                idx_wstawienia = i;
+                break;
+            }
+        }
+    }
+
+    for (int i = *cnt; i > idx_wstawienia; i--) {
+        q[i] = q[i-1];
+    }
+
+    q[idx_wstawienia].pid = pid;
+    q[idx_wstawienia].group_priority = priority;
+    (*cnt)++;
 }
 
-void zapros_klienta(int msg_id, pid_t *kolejka, int *cnt, int idx_w_kolejce, int nr_miejsca, int typ) {
-    pid_t pid = kolejka[idx_w_kolejce];
+void dodaj_do_kolejki(int rozmiar, int priority, pid_t pid) {
+    if (rozmiar == 1) wstaw_do_kolejki(queue_g1, &q1_cnt, pid, priority);
+    else if (rozmiar == 2) wstaw_do_kolejki(queue_g2, &q2_cnt, pid, priority);
+    else if (rozmiar == 3) wstaw_do_kolejki(queue_g3, &q3_cnt, pid, priority);
+    else if (rozmiar >= 4) wstaw_do_kolejki(queue_g4, &q4_cnt, pid, priority);
+}
+
+void zapros_klienta(int msg_id, wpis_kolejki *kolejka, int *cnt, int idx_w_kolejce, int nr_miejsca, int typ) {
+    pid_t pid = kolejka[idx_w_kolejce].pid;
     
     struct komunikat zaproszenie;
     zaproszenie.mtype = pid; 
     zaproszenie.numer_miejsca = nr_miejsca;
     zaproszenie.typ_miejsca = typ;
     msgsnd(msg_id, &zaproszenie, sizeof(struct komunikat) - sizeof(long), 0);
+    
+    if (typ == 0) zrzut_do_logu("OBSLUGA: Przydzielono LADE %d dla PID %d", nr_miejsca, pid);
+    else zrzut_do_logu("OBSLUGA: Przydzielono STOLIK %d dla PID %d", nr_miejsca, pid);
 
     for (int i = idx_w_kolejce; i < *cnt - 1; i++) {
         kolejka[i] = kolejka[i+1];
@@ -50,89 +82,68 @@ int main() {
     while (r->otwarta) {
         struct komunikat buf;
         while (msgrcv(msg, &buf, sizeof(struct komunikat)-sizeof(long), 1, IPC_NOWAIT) != -1) {
-            dodaj_do_kolejki(buf.rozmiar_grupy, buf.pid_nadawcy);
+            dodaj_do_kolejki(buf.rozmiar_grupy, buf.group_priority, buf.pid_nadawcy);
         }
 
         lock(sem);
-        
-        
         if (q4_cnt > 0) {
             for (int i=6; i<10; i++) { 
                 if (r->stoliki[i].ile_osob == 0) {
-                    r->stoliki[i].ile_osob = 4; 
-                    zapros_klienta(msg, queue_g4, &q4_cnt, 0, i, 1);
+                    r->stoliki[i].ile_osob = 4; zapros_klienta(msg, queue_g4, &q4_cnt, 0, i, 1);
                     if(q4_cnt == 0) break;
                 }
             }
         }
-
         if (q3_cnt > 0) {
             for (int i=3; i<6; i++) { 
                 if (r->stoliki[i].ile_osob == 0) {
-                    r->stoliki[i].ile_osob = 3;
-                    zapros_klienta(msg, queue_g3, &q3_cnt, 0, i, 1);
+                    r->stoliki[i].ile_osob = 3; zapros_klienta(msg, queue_g3, &q3_cnt, 0, i, 1);
                     if(q3_cnt == 0) break;
                 }
             }
-            if (q3_cnt > 0 && q4_cnt == 0) {
+            if (q3_cnt > 0 && q4_cnt == 0) { 
                 for (int i=6; i<10; i++) {
                      if (r->stoliki[i].ile_osob == 0) {
-                        r->stoliki[i].ile_osob = 3;
-                        zapros_klienta(msg, queue_g3, &q3_cnt, 0, i, 1);
+                        r->stoliki[i].ile_osob = 3; zapros_klienta(msg, queue_g3, &q3_cnt, 0, i, 1);
                         if(q3_cnt == 0) break;
                     }
                 }
             }
         }
-
         if (q2_cnt > 0) {
-            for (int i = 0; i < LADA_MIEJSC - 1; i++) {
+            for (int i = 0; i < LADA_MIEJSC - 1; i++) { 
                 if (r->lada[i].zajete == 0 && r->lada[i+1].zajete == 0) {
-                    r->lada[i].zajete = 1;
-                    r->lada[i+1].zajete = 1;
+                    r->lada[i].zajete=1; r->lada[i+1].zajete=1;
                     zapros_klienta(msg, queue_g2, &q2_cnt, 0, i, 0); 
                     if(q2_cnt == 0) break;
                 }
             }
-
-            if (q2_cnt > 0) {
-                for (int i=0; i<3; i++) {
-                    if (r->stoliki[i].ile_osob == 0) {
-                        r->stoliki[i].ile_osob = 2;
-                        zapros_klienta(msg, queue_g2, &q2_cnt, 0, i, 1);
-                        if(q2_cnt == 0) break;
-                    }
+            if (q2_cnt > 0) { 
+                for (int i=0; i<3; i++) { 
+                    if (r->stoliki[i].ile_osob==0) { r->stoliki[i].ile_osob=2; zapros_klienta(msg, queue_g2, &q2_cnt, 0, i, 1); if(q2_cnt==0) break;}
                 }
             }
-            if (q2_cnt > 0 && q3_cnt == 0) {
+            if (q2_cnt > 0 && q3_cnt == 0) { 
                 for (int i=3; i<6; i++) {
-                    if (r->stoliki[i].ile_osob == 0) {
-                        r->stoliki[i].ile_osob = 2;
-                        zapros_klienta(msg, queue_g2, &q2_cnt, 0, i, 1);
-                        if(q2_cnt == 0) break;
-                    }
+                    if (r->stoliki[i].ile_osob==0) { r->stoliki[i].ile_osob=2; zapros_klienta(msg, queue_g2, &q2_cnt, 0, i, 1); if(q2_cnt==0) break;}
                 }
             }
-            if (q2_cnt > 0) {
+            if (q2_cnt > 0) { 
                 for (int i=6; i<10; i++) {
                     int wolne = r->stoliki[i].pojemnosc - r->stoliki[i].ile_osob;
                     int dosiadka = (r->stoliki[i].ile_osob > 0);
-                    int pusty_ale_wolno = (r->stoliki[i].ile_osob == 0 && q4_cnt == 0 && q3_cnt == 0);
-
-                    if (wolne >= 2 && (dosiadka || pusty_ale_wolno)) {
-                        r->stoliki[i].ile_osob += 2;
-                        zapros_klienta(msg, queue_g2, &q2_cnt, 0, i, 1);
+                    int pusty_ok = (r->stoliki[i].ile_osob == 0 && q4_cnt==0 && q3_cnt==0);
+                    if (wolne >= 2 && (dosiadka || pusty_ok)) {
+                        r->stoliki[i].ile_osob += 2; zapros_klienta(msg, queue_g2, &q2_cnt, 0, i, 1);
                         if(q2_cnt == 0) break;
                     }
                 }
             }
         }
-
         if (q1_cnt > 0) {
             for (int i=0; i<LADA_MIEJSC; i++) {
                 if (r->lada[i].zajete == 0) {
-                    r->lada[i].zajete = 1;
-                    zapros_klienta(msg, queue_g1, &q1_cnt, 0, i, 0); 
+                    r->lada[i].zajete = 1; zapros_klienta(msg, queue_g1, &q1_cnt, 0, i, 0); 
                     if(q1_cnt == 0) break;
                 }
             }
@@ -141,14 +152,10 @@ int main() {
                     if (r->stoliki[i].ile_osob < r->stoliki[i].pojemnosc) {
                         int pusty = (r->stoliki[i].ile_osob == 0);
                         int blokada = 0;
-                        if (pusty) {
-                            if (r->stoliki[i].pojemnosc == 4 && q4_cnt > 0) blokada = 1;
-                            if (r->stoliki[i].pojemnosc == 3 && q3_cnt > 0) blokada = 1;
-                            if (r->stoliki[i].pojemnosc == 2 && q2_cnt > 0) blokada = 1;
-                        }
+                        if (pusty && (q4_cnt>0 || q3_cnt>0 || q2_cnt>0)) blokada = 1; 
+                        
                         if (!blokada) {
-                            r->stoliki[i].ile_osob += 1;
-                            zapros_klienta(msg, queue_g1, &q1_cnt, 0, i, 1);
+                            r->stoliki[i].ile_osob += 1; zapros_klienta(msg, queue_g1, &q1_cnt, 0, i, 1);
                             if(q1_cnt == 0) break;
                         }
                     }
@@ -160,7 +167,11 @@ int main() {
 
         system("clear");
         printf("\n=== MONITOR SALI I KOLEJEK ===\n");
-        printf("Kolejki: G4:[%d] G3:[%d] G2:[%d] G1:[%d]\n", q4_cnt, q3_cnt, q2_cnt, q1_cnt);
+        printf("Kolejki: G4:[%d:%d] G3:[%d:%d] G2:[%d:%d] G1:[%d:%d]\n", 
+               q4_cnt, queue_g4[0].group_priority, 
+               q3_cnt, queue_g3[0].group_priority, 
+               q2_cnt, queue_g2[0].group_priority, 
+               q1_cnt, queue_g1[0].group_priority);
         printf("---------------------------------------------------------------------------------\n");
         printf("| SEG |       MIEJSCE       |          NA TASMIE           |      KLIENCI       \n");
         printf("---------------------------------------------------------------------------------\n");
@@ -192,7 +203,12 @@ int main() {
                     struct klient_info *k = &r->klienci[i];
                     if (!k->aktywny || k->segment != seg) continue;
                     if (found) printf(", ");
-                    printf("PID=%d%s G=%d (%d/%d)", k->pid, k->czeka_na_specjalne ? "*" : "", k->id_grupy, k->zjedzone, k->limit);
+                    
+                    char status[15] = "";
+                    if (k->is_vip) strcat(status, "VIP ");
+                    if (k->is_child) strcat(status, "JUNIOR ");
+                    
+                    printf("PID=%d %sG=%d (%d/%d)", k->pid, status, k->id_grupy, k->zjedzone, k->limit);
                     found = 1;
                 }
             }
