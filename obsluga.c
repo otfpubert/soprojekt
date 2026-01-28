@@ -1,10 +1,12 @@
 /*
- * obsluga.c - Proces obsługi restauracji (manager sali)
+ * obsluga.c - Proces obsługi restauracji (manager sali + kasa)
  *
  * Odpowiada za:
  * - Przyjmowanie zgłoszeń klientów przez kolejkę komunikatów
  * - Przydzielanie miejsc przy ladzie i stolikach (algorytm "Tetris")
  * - Wyświetlanie monitora stanu sali w czasie rzeczywistym
+ * - KASA: Przyjmowanie płatności i wystawianie rachunków
+ * - Generowanie podsumowania końcowego
  */
 
 #include <stdio.h>
@@ -15,8 +17,112 @@
 #include <sys/sem.h>
 #include <sys/msg.h>
 #include <errno.h>
+#include <signal.h>
 
 #include "wspolne.h"
+
+/* Zmienne globalne dla podsumowania */
+struct restauracja *r_global = NULL;
+volatile int generuj_raport = 0;
+
+/*
+ * Handler SIGTERM - ustawia flagę do generowania raportu.
+ */
+void handler_zamkniecie(int sig) {
+    (void)sig;
+    generuj_raport = 1;
+}
+
+/*
+ * Oblicza sumę rachunku na podstawie talerzyków.
+ */
+int oblicz_rachunek(int talerzyki[KOLORY]) {
+    int suma = 0;
+    for (int i = 0; i < KOLORY; i++) {
+        suma += talerzyki[i] * ceny[i];
+    }
+    return suma;
+}
+
+/*
+ * Generuje podsumowanie końcowe do pliku.
+ */
+void generuj_podsumowanie(struct restauracja *r) {
+    FILE *f = fopen("raport_dzienny.txt", "w");
+    if (!f) {
+        perror("[OBSLUGA] fopen raport_dzienny.txt");
+        return;
+    }
+
+    fprintf(f, "========================================\n");
+    fprintf(f, "    RAPORT DZIENNY - KAITEN ZUSHI\n");
+    fprintf(f, "========================================\n\n");
+
+    /* Sekcja KASA */
+    fprintf(f, "--- KASA (sprzedaz) ---\n");
+    fprintf(f, "Liczba transakcji: %d\n", r->kasa.transakcje);
+    fprintf(f, "Utarg dzienny: %d zl\n\n", r->kasa.suma_dzienna);
+
+    fprintf(f, "Sprzedane talerzyki:\n");
+    fprintf(f, "+---------------+------+--------+\n");
+    fprintf(f, "| Kolor         | Szt. | Kwota  |\n");
+    fprintf(f, "+---------------+------+--------+\n");
+    int suma_szt = 0;
+    for (int i = 0; i < KOLORY; i++) {
+        int kwota = r->kasa.sprzedane_talerzyki[i] * ceny[i];
+        fprintf(f, "| %-13s | %4d | %6d |\n",
+                nazwy_kolorow[i], r->kasa.sprzedane_talerzyki[i], kwota);
+        suma_szt += r->kasa.sprzedane_talerzyki[i];
+    }
+    fprintf(f, "+---------------+------+--------+\n");
+    fprintf(f, "| RAZEM         | %4d | %6d |\n", suma_szt, r->kasa.suma_dzienna);
+    fprintf(f, "+---------------+------+--------+\n\n");
+
+    /* Sekcja KUCHARZ */
+    fprintf(f, "--- KUCHARZ (produkcja) ---\n");
+    fprintf(f, "+---------------+------+\n");
+    fprintf(f, "| Kolor         | Szt. |\n");
+    fprintf(f, "+---------------+------+\n");
+    int suma_prod = 0;
+    for (int i = 0; i < KOLORY; i++) {
+        fprintf(f, "| %-13s | %4d |\n", nazwy_kolorow[i], r->wyprodukowane[i]);
+        suma_prod += r->wyprodukowane[i];
+    }
+    fprintf(f, "+---------------+------+\n");
+    fprintf(f, "| RAZEM         | %4d |\n", suma_prod);
+    fprintf(f, "+---------------+------+\n\n");
+
+    /* Sekcja POZOSTALE NA TASMIE */
+    fprintf(f, "--- POZOSTALE NA TASMIE ---\n");
+    int pozostale[KOLORY] = {0};
+    int suma_pozostale = 0;
+    for (int i = 0; i < SEGMENTY; i++) {
+        if (r->tasma.seg[i].zajety) {
+            pozostale[r->tasma.seg[i].t.kolor]++;
+            suma_pozostale++;
+        }
+    }
+    fprintf(f, "+---------------+------+\n");
+    fprintf(f, "| Kolor         | Szt. |\n");
+    fprintf(f, "+---------------+------+\n");
+    for (int i = 0; i < KOLORY; i++) {
+        if (pozostale[i] > 0) {
+            fprintf(f, "| %-13s | %4d |\n", nazwy_kolorow[i], pozostale[i]);
+        }
+    }
+    fprintf(f, "+---------------+------+\n");
+    fprintf(f, "| RAZEM         | %4d |\n", suma_pozostale);
+    fprintf(f, "+---------------+------+\n\n");
+
+    fprintf(f, "========================================\n");
+    fprintf(f, "        KONIEC RAPORTU\n");
+    fprintf(f, "========================================\n");
+
+    fclose(f);
+    printf("[OBSLUGA] Raport dzienny zapisany do raport_dzienny.txt\n");
+    zrzut_do_logu("OBSLUGA: Raport - %d transakcji, %d zl utargu, %d wyprodukowano, %d pozostalo",
+                  r->kasa.transakcje, r->kasa.suma_dzienna, suma_prod, suma_pozostale);
+}
 
 /* --- STRUKTURA LOKALNEJ KOLEJKI --- */
 typedef struct {
@@ -99,10 +205,16 @@ void zapros_klienta(int msg_id, wpis_kolejki *kolejka, int *cnt, int idx_w_kolej
 }
 
 int main() {
-    printf("[OBSLUGA] Start managera sali\n");
+    printf("[OBSLUGA] Start managera sali + kasy\n");
+
+    /* Rejestracja handlera zamknięcia */
+    if (signal(SIGTERM, handler_zamkniecie) == SIG_ERR) {
+        perror("[OBSLUGA] signal(SIGTERM)");
+        exit(EXIT_FAILURE);
+    }
 
     /* Generowanie klucza IPC */
-    key_t key = ftok("ipc_keyfile", 'C');
+    key_t key = ftok("ipc_keyfile", 'K');
     if (key == -1) {
         perror("[OBSLUGA] ftok");
         exit(EXIT_FAILURE);
@@ -136,6 +248,24 @@ int main() {
 
     printf("[OBSLUGA] Polaczono z zasobami IPC (shm=%d, sem=%d, msg=%d)\n", shm, sem, msg);
 
+    /* Ustawienie zmiennej globalnej dla handlera */
+    r_global = r;
+
+    /* Inicjalizacja statystyk kasy */
+    lock(sem);
+    r->kasa.transakcje = 0;
+    r->kasa.suma_dzienna = 0;
+    for (int i = 0; i < KOLORY; i++) {
+        r->kasa.sprzedane_talerzyki[i] = 0;
+    }
+    for (int i = 0; i < MAX_GRUP; i++) {
+        r->grupa_zaplacila[i] = 0;
+        for (int j = 0; j < KOLORY; j++) {
+            r->grupa_talerzyki[i][j] = 0;
+        }
+    }
+    unlock(sem);
+
     while (r->otwarta) {
         /* 1. Odbierz nowe zgłoszenia klientów (non-blocking) */
         struct komunikat buf;
@@ -156,6 +286,46 @@ int main() {
                 break;
             }
             perror("[OBSLUGA] msgrcv");
+        }
+
+        /* 1b. Odbierz żądania rachunków (KASA) */
+        struct komunikat_kasa_req kasa_req;
+        while (msgrcv(msg, &kasa_req, sizeof(kasa_req) - sizeof(long),
+                      -(MSG_KASA_REQ + MAX_GRUP), IPC_NOWAIT) != -1) {
+
+            int id_grupy = kasa_req.id_grupy;
+            pid_t pid_lidera = kasa_req.pid_lidera;
+
+            /* Obliczenie sumy rachunku */
+            int suma = oblicz_rachunek(kasa_req.talerzyki);
+
+            /* Aktualizacja statystyk kasy */
+            lock(sem);
+            r->kasa.transakcje++;
+            r->kasa.suma_dzienna += suma;
+            for (int i = 0; i < KOLORY; i++) {
+                r->kasa.sprzedane_talerzyki[i] += kasa_req.talerzyki[i];
+            }
+            r->grupa_zaplacila[id_grupy] = 1;
+            sprintf(r->info, "KASA: Grupa %d zaplacila %d zl", id_grupy, suma);
+            unlock(sem);
+
+            /* Wysłanie odpowiedzi z rachunkiem */
+            struct komunikat_kasa_resp kasa_resp;
+            kasa_resp.mtype = pid_lidera;
+            kasa_resp.suma = suma;
+            for (int i = 0; i < KOLORY; i++) {
+                kasa_resp.talerzyki[i] = kasa_req.talerzyki[i];
+            }
+
+            if (msgsnd(msg, &kasa_resp, sizeof(kasa_resp) - sizeof(long), 0) == -1) {
+                if (errno != EIDRM) {
+                    perror("[OBSLUGA/KASA] msgsnd odpowiedz");
+                }
+            } else {
+                zrzut_do_logu("KASA: Grupa %d (lider PID=%d) zaplacila %d zl",
+                              id_grupy, pid_lidera, suma);
+            }
         }
 
         lock(sem);
@@ -295,17 +465,22 @@ int main() {
             printf("\n");
         }
         printf("---------------------------------------------------------------------------------\n");
+        printf("[KASA] Transakcje: %d | Utarg: %d zl\n", r->kasa.transakcje, r->kasa.suma_dzienna);
         printf("[INFO]: %s\n", r->info);
 
         sleep(1);
     }
 
-    printf("[OBSLUGA] Restauracja zamknieta. Konczenie pracy.\n");
+    printf("[OBSLUGA] Restauracja zamknieta. Generowanie raportu...\n");
+
+    /* Generowanie podsumowania końcowego */
+    generuj_podsumowanie(r);
 
     /* Odłączenie od pamięci dzielonej */
     if (shmdt(r) == -1) {
         perror("[OBSLUGA] shmdt");
     }
 
+    printf("[OBSLUGA] Koniec pracy.\n");
     return 0;
 }
