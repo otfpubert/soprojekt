@@ -9,7 +9,7 @@
 #include "wspolne.h"
 
 int main() {
-    key_t key = ftok("ipc_keyfile", 'Z');
+    key_t key = ftok("ipc_keyfile", 'C');
     if (key == -1) {
         perror("[TASMA] ftok");
         exit(1);
@@ -38,10 +38,12 @@ int main() {
 
         struct segment_tasmy tmp[SEGMENTY];
 
+        /* kopia stanu tasmy */
         for (int i = 0; i < SEGMENTY; i++) {
             tmp[i] = r->tasma.seg[i];
         }
 
+        /* czysty ruch cykliczny 0..19 */
         for (int i = 0; i < SEGMENTY; i++) {
             r->tasma.seg[(i + 1) % SEGMENTY] = tmp[i];
         }

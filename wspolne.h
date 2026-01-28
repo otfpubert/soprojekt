@@ -1,22 +1,44 @@
 #ifndef WSPOLNE_H
 #define WSPOLNE_H
 
+#define _XOPEN_SOURCE 700 
+
 #include <sys/sem.h>
 #include <sys/types.h>
 #include <sys/msg.h>
+#include <sys/stat.h>
+#include <fcntl.h>  
+#include <unistd.h> 
 #include <stdio.h>
 #include <string.h>
 #include <time.h>
-#include <stdarg.h> 
+#include <stdarg.h>
+#include <errno.h> 
+#include <signal.h>
+#include <stdlib.h>
 
 #define PRAWA 0600
 
+
+static inline void check_error(int ret, const char *msg) {
+    if (ret == -1) {
+        perror(msg);
+        exit(EXIT_FAILURE);
+    }
+}
+
+
+static inline int check_error_warn(int ret, const char *msg) {
+    if (ret == -1) {
+        perror(msg);
+        return -1;
+    }
+    return ret;
+}
 #define SEGMENTY 20
 #define KOLORY 6 
-
 #define LADA_MIEJSC 9
 #define STOLIKI 10
-
 #define MAX_KLIENTOW 200 
 #define MAX_GRUP     100
 #define MAX_ZAMOWIEN 50
@@ -27,7 +49,6 @@ struct komunikat {
     int rozmiar_grupy;
     int numer_miejsca;
     int typ_miejsca;
-    
     int group_priority;     
 };
 
@@ -62,7 +83,6 @@ struct klient_info {
     int limit;
     int aktywny;
     int czeka_na_specjalne;
-    
     int is_vip;   
     int is_child; 
 };
@@ -87,6 +107,7 @@ struct zamowienie {
 
 struct restauracja {
     int otwarta;
+    pid_t pid_kucharza; 
 
     struct tasma tasma;
     struct miejsce_lada lada[LADA_MIEJSC];
@@ -104,36 +125,45 @@ struct restauracja {
     int sprzedane[KOLORY];
 };
 
+
 static inline void lock(int sem) {
     struct sembuf sb = {0, -1, 0};
-    semop(sem, &sb, 1);
+    if (semop(sem, &sb, 1) == -1) {
+        if (errno != EINTR && errno != EIDRM) {
+            perror("lock: semop");
+        }
+    }
 }
+
 
 static inline void unlock(int sem) {
     struct sembuf sb = {0, 1, 0};
-    semop(sem, &sb, 1);
+    if (semop(sem, &sb, 1) == -1) {
+        if (errno != EINTR && errno != EIDRM) {
+            perror("unlock: semop");
+        }
+    }
 }
 
 static inline void zrzut_do_logu(const char *format, ...) {
-    FILE *f = fopen("debug.log", "a");
-    if (f == NULL) return;
+    int fd = open("debug.log", O_WRONLY | O_CREAT | O_APPEND, 0644);
+    if (fd == -1) return;
     
-    time_t now; 
-    time(&now);
+    char buffer[512];
+    time_t now; time(&now);
     char *date = ctime(&now);
-    if (date != NULL && strlen(date) > 0) {
-        date[strlen(date) - 1] = '\0'; 
-    }
+    if (date) date[strlen(date) - 1] = '\0';
     
-    fprintf(f, "[%s] ", date ? date : "UNKNOWN");
+    int len = sprintf(buffer, "[%s] ", date ? date : "UNKNOWN");
     
     va_list args;
     va_start(args, format);
-    vfprintf(f, format, args);
+    len += vsprintf(buffer + len, format, args);
     va_end(args);
     
-    fprintf(f, "\n");
-    fclose(f);
+    buffer[len] = '\n';
+    write(fd, buffer, len + 1);
+    close(fd);
 }
 
 #endif

@@ -9,13 +9,15 @@
 
 #include "wspolne.h"
 
+// --- STRUKTURA LOKALNEJ KOLEJKI ---
 typedef struct {
     pid_t pid;
-    int group_priority; 
+    int group_priority; // Czy grupa ma priorytet (VIP)
 } wpis_kolejki;
 
 #define Q_SIZE 100
 
+// Kolejki
 wpis_kolejki queue_g1[Q_SIZE]; int q1_cnt = 0;
 wpis_kolejki queue_g2[Q_SIZE]; int q2_cnt = 0;
 wpis_kolejki queue_g3[Q_SIZE]; int q3_cnt = 0;
@@ -27,6 +29,7 @@ void wstaw_do_kolejki(wpis_kolejki *q, int *cnt, pid_t pid, int priority) {
     int idx_wstawienia = *cnt; 
 
     if (priority) {
+        // Jesli grupa ma priorytet, szukamy pierwszego BEZ priorytetu
         for (int i = 0; i < *cnt; i++) {
             if (q[i].group_priority == 0) {
                 idx_wstawienia = i;
@@ -70,7 +73,7 @@ void zapros_klienta(int msg_id, wpis_kolejki *kolejka, int *cnt, int idx_w_kolej
 }
 
 int main() {
-    key_t key = ftok("ipc_keyfile", 'Z');
+    key_t key = ftok("ipc_keyfile", 'C');
     int shm = shmget(key, sizeof(struct restauracja), 0);
     int sem = semget(key, 1, 0);
     int msg = msgget(key, 0);
@@ -80,12 +83,17 @@ int main() {
     printf("[OBSLUGA] Start managera sali\n");
 
     while (r->otwarta) {
+        // 1. Odbierz nowe zgloszenia
         struct komunikat buf;
         while (msgrcv(msg, &buf, sizeof(struct komunikat)-sizeof(long), 1, IPC_NOWAIT) != -1) {
+            // Przekazujemy group_priority do kolejki
             dodaj_do_kolejki(buf.rozmiar_grupy, buf.group_priority, buf.pid_nadawcy);
         }
 
         lock(sem);
+        
+        // 2. LOGIKA TETRIS 
+        // G4
         if (q4_cnt > 0) {
             for (int i=6; i<10; i++) { 
                 if (r->stoliki[i].ile_osob == 0) {
@@ -94,6 +102,7 @@ int main() {
                 }
             }
         }
+        // G3
         if (q3_cnt > 0) {
             for (int i=3; i<6; i++) { 
                 if (r->stoliki[i].ile_osob == 0) {
@@ -110,6 +119,7 @@ int main() {
                 }
             }
         }
+        // G2
         if (q2_cnt > 0) {
             for (int i = 0; i < LADA_MIEJSC - 1; i++) { 
                 if (r->lada[i].zajete == 0 && r->lada[i+1].zajete == 0) {
@@ -140,6 +150,7 @@ int main() {
                 }
             }
         }
+        // G1
         if (q1_cnt > 0) {
             for (int i=0; i<LADA_MIEJSC; i++) {
                 if (r->lada[i].zajete == 0) {
@@ -165,6 +176,7 @@ int main() {
         
         unlock(sem);
 
+        // 3. WYSWIETLANIE
         system("clear");
         printf("\n=== MONITOR SALI I KOLEJEK ===\n");
         printf("Kolejki: G4:[%d:%d] G3:[%d:%d] G2:[%d:%d] G1:[%d:%d]\n", 

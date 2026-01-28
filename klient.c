@@ -7,11 +7,29 @@
 #include <sys/msg.h>
 #include <errno.h>
 #include <time.h>
+#include <signal.h>
 
 #include "wspolne.h"
 
+
+struct restauracja *r_global = NULL;
+int moj_slot_idx_global = -1;
+int sem_global = -1;
+
+void handler_ewakuacja(int sig) {
+    if (r_global != NULL && moj_slot_idx_global != -1 && sem_global != -1) {
+        lock(sem_global);
+        r_global->klienci[moj_slot_idx_global].aktywny = 0;
+        unlock(sem_global);
+        
+    }
+    zrzut_do_logu("KLIENT %d: EWAKUACJA! Uciekam!", getpid());
+    exit(0);
+}
+
 int main(int argc, char *argv[]) {
     srand(getpid() ^ time(NULL));
+    signal(SIGTERM, handler_ewakuacja); 
 
     int moj_gid = 0;
     int moja_grupa_size = 1;
@@ -30,12 +48,16 @@ int main(int argc, char *argv[]) {
     
     if (moj_gid >= MAX_GRUP) exit(1);
 
-    key_t key = ftok("ipc_keyfile", 'Z');
+    key_t key = ftok("ipc_keyfile", 'C');
     int shm = shmget(key, sizeof(struct restauracja), 0);
     int sem = semget(key, 1, 0);
     int msg = msgget(key, 0); 
     if (shm == -1 || sem == -1 || msg == -1) exit(1);
     struct restauracja *r = shmat(shm, NULL, 0);
+
+    
+    r_global = r;
+    sem_global = sem;
 
     int moj_slot_idx = -1;
     int do_zjedzenia = 2 + rand() % 3;
@@ -56,6 +78,9 @@ int main(int argc, char *argv[]) {
         }
     }
     unlock(sem);
+    
+    
+    moj_slot_idx_global = moj_slot_idx;
 
     if(ja_jestem_vip) printf("[KLIENT %d] VIP z G=%d wchodzi!\n", getpid(), moj_gid);
     else if(ja_jestem_dziecko) printf("[KLIENT %d] Dziecko z G=%d wchodzi!\n", getpid(), moj_gid);
