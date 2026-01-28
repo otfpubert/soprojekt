@@ -214,7 +214,7 @@ int main() {
     }
 
     /* Generowanie klucza IPC */
-    key_t key = ftok("ipc_keyfile", 'K');
+    key_t key = ftok("ipc_keyfile", 'C');
     if (key == -1) {
         perror("[OBSLUGA] ftok");
         exit(EXIT_FAILURE);

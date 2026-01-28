@@ -86,7 +86,7 @@ int main() {
     }
 
     /* Generowanie klucza IPC z pliku ipc_keyfile */
-    key_t key = ftok("ipc_keyfile", 'C');
+    key_t key = ftok("ipc_keyfile", 'K');
     if (key == -1) {
         perror("[MAIN] ftok - upewnij sie ze plik ipc_keyfile istnieje");
         exit(EXIT_FAILURE);
@@ -138,6 +138,8 @@ int main() {
     /* Inicjalizacja struktury restauracji */
     r->otwarta = 1;
     r->pid_kucharza = 0;
+    r->czas_startu = time(NULL);
+    r->przyjmuje_klientow = 1;  /* Restauracja przyjmuje nowych klientów */
     sprintf(r->info, "System uruchomiony. Czekam na gosci.");
 
     for (int i = 0; i < MAX_GRUP; i++) {
@@ -198,9 +200,24 @@ int main() {
     }
     printf("[MAIN] Tasma uruchomiona (PID=%d)\n", pid_tasma);
 
-    printf("[MAIN] Uruchamianie %d grup klientow...\n", LICZBA_GRUP);
+    printf("[MAIN] Uruchamianie grup klientow (max %d, czas pracy: %ds)...\n",
+           LICZBA_GRUP, CZAS_ZAMKNIECIA);
 
     for (int g = 0; g < LICZBA_GRUP; g++) {
+        /* Sprawdzenie czy restauracja nadal przyjmuje klientów */
+        time_t teraz = time(NULL);
+        int czas_od_startu = (int)(teraz - r->czas_startu);
+
+        if (czas_od_startu >= CZAS_ZAMKNIECIA) {
+            printf("[MAIN] Czas zamkniecia (Tk=%ds) osiagniety. Przestajemy przyjmowac nowych klientow.\n",
+                   CZAS_ZAMKNIECIA);
+            lock(g_sem_id);
+            r->przyjmuje_klientow = 0;
+            sprintf(r->info, "RESTAURACJA ZAMKNIETA dla nowych klientow! Obslugujemy pozostalych.");
+            unlock(g_sem_id);
+            break;  /* Przerywamy tworzenie nowych grup */
+        }
+
         int rozmiar = 1 + rand() % 4;
 
         /* Tablice VLA dla statusu członków grupy */
@@ -255,7 +272,36 @@ int main() {
         usleep(500000); /* 0.5 sekundy zamiast 1s - szybsza symulacja */
     }
 
-    printf("[MAIN] Wszystkie grupy klientow utworzone. Oczekiwanie na zakonczenie...\n");
+    printf("[MAIN] Koniec przyjmowania nowych klientow.\n");
+
+    /* Czekamy aż wszyscy klienci zostaną obsłużeni (przed zamknięciem) */
+    printf("[MAIN] Czekam az wszyscy obecni klienci zostana obsluzeni...\n");
+    while (1) {
+        lock(g_sem_id);
+        int aktywni = 0;
+        for (int i = 0; i < MAX_KLIENTOW; i++) {
+            if (r->klienci[i].aktywny) aktywni++;
+        }
+        unlock(g_sem_id);
+
+        if (aktywni == 0) {
+            printf("[MAIN] Wszyscy klienci obsluzeni. Zamykanie restauracji.\n");
+            break;
+        }
+        printf("[MAIN] Pozostalo %d aktywnych klientow. Czekam...\n", aktywni);
+        sleep(2);
+    }
+
+    /* Zamknięcie restauracji - to zatrzyma pętle w innych procesach */
+    lock(g_sem_id);
+    r->otwarta = 0;
+    sprintf(r->info, "RESTAURACJA ZAMKNIETA. Do zobaczenia jutro!");
+    unlock(g_sem_id);
+
+    /* Dajemy czas procesom na zakończenie i wygenerowanie raportów */
+    sleep(2);
+
+    printf("[MAIN] Oczekiwanie na zakonczenie procesow potomnych...\n");
 
     /* Oczekiwanie na zakończenie wszystkich procesów potomnych */
     int status;

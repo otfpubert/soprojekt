@@ -1,12 +1,11 @@
 /*
- * obsluga.c - Proces obsługi restauracji (manager sali + kasa)
+ * klient.c - Proces klienta restauracji
  *
  * Odpowiada za:
- * - Przyjmowanie zgłoszeń klientów przez kolejkę komunikatów
- * - Przydzielanie miejsc przy ladzie i stolikach (algorytm "Tetris")
- * - Wyświetlanie monitora stanu sali w czasie rzeczywistym
- * - KASA: Przyjmowanie płatności i wystawianie rachunków
- * - Generowanie podsumowania końcowego
+ * - Rejestrację w systemie i oczekiwanie na miejsce
+ * - Jedzenie potraw z taśmy
+ * - Składanie zamówień specjalnych
+ * - Synchronizację z innymi członkami grupy
  */
 
 #include <stdio.h>
@@ -17,470 +16,378 @@
 #include <sys/sem.h>
 #include <sys/msg.h>
 #include <errno.h>
+#include <time.h>
 #include <signal.h>
 
 #include "wspolne.h"
 
-/* Zmienne globalne dla podsumowania */
+/* Zmienne globalne do sprzątania w handlerze sygnału */
 struct restauracja *r_global = NULL;
-volatile int generuj_raport = 0;
+int moj_slot_idx_global = -1;
+int sem_global = -1;
 
 /*
- * Handler SIGTERM - ustawia flagę do generowania raportu.
+ * Handler sygnału SIGTERM - ewakuacja klienta.
+ * Zwalnia slot w tablicy klientów i kończy proces.
  */
-void handler_zamkniecie(int sig) {
-    (void)sig;
-    generuj_raport = 1;
+void handler_ewakuacja(int sig) {
+    (void)sig; /* Suppress unused parameter warning */
+
+    if (r_global != NULL && moj_slot_idx_global != -1 && sem_global != -1) {
+        lock(sem_global);
+        r_global->klienci[moj_slot_idx_global].aktywny = 0;
+        unlock(sem_global);
+    }
+    zrzut_do_logu("KLIENT %d: EWAKUACJA! Uciekam!", getpid());
+    exit(0);
 }
 
-/*
- * Oblicza sumę rachunku na podstawie talerzyków.
- */
-int oblicz_rachunek(int talerzyki[KOLORY]) {
-    int suma = 0;
-    for (int i = 0; i < KOLORY; i++) {
-        suma += talerzyki[i] * ceny[i];
-    }
-    return suma;
-}
+int main(int argc, char *argv[]) {
+    srand(getpid() ^ time(NULL));
 
-/*
- * Generuje podsumowanie końcowe do pliku.
- */
-void generuj_podsumowanie(struct restauracja *r) {
-    FILE *f = fopen("raport_dzienny.txt", "w");
-    if (!f) {
-        perror("[OBSLUGA] fopen raport_dzienny.txt");
-        return;
+    /* Rejestracja handlera ewakuacji */
+    if (signal(SIGTERM, handler_ewakuacja) == SIG_ERR) {
+        perror("[KLIENT] signal(SIGTERM)");
+        exit(EXIT_FAILURE);
     }
 
-    fprintf(f, "========================================\n");
-    fprintf(f, "    RAPORT DZIENNY - KAITEN ZUSHI\n");
-    fprintf(f, "========================================\n\n");
+    /* Parsowanie argumentów */
+    int moj_gid = 0;
+    int moja_grupa_size = 1;
+    int ja_jestem_vip = 0;
+    int moja_grupa_ma_priorytet = 0;
+    int ja_jestem_dziecko = 0;
 
-    /* Sekcja KASA */
-    fprintf(f, "--- KASA (sprzedaz) ---\n");
-    fprintf(f, "Liczba transakcji: %d\n", r->kasa.transakcje);
-    fprintf(f, "Utarg dzienny: %d zl\n\n", r->kasa.suma_dzienna);
-
-    fprintf(f, "Sprzedane talerzyki:\n");
-    fprintf(f, "+---------------+------+--------+\n");
-    fprintf(f, "| Kolor         | Szt. | Kwota  |\n");
-    fprintf(f, "+---------------+------+--------+\n");
-    int suma_szt = 0;
-    for (int i = 0; i < KOLORY; i++) {
-        int kwota = r->kasa.sprzedane_talerzyki[i] * ceny[i];
-        fprintf(f, "| %-13s | %4d | %6d |\n",
-                nazwy_kolorow[i], r->kasa.sprzedane_talerzyki[i], kwota);
-        suma_szt += r->kasa.sprzedane_talerzyki[i];
-    }
-    fprintf(f, "+---------------+------+--------+\n");
-    fprintf(f, "| RAZEM         | %4d | %6d |\n", suma_szt, r->kasa.suma_dzienna);
-    fprintf(f, "+---------------+------+--------+\n\n");
-
-    /* Sekcja KUCHARZ */
-    fprintf(f, "--- KUCHARZ (produkcja) ---\n");
-    fprintf(f, "+---------------+------+\n");
-    fprintf(f, "| Kolor         | Szt. |\n");
-    fprintf(f, "+---------------+------+\n");
-    int suma_prod = 0;
-    for (int i = 0; i < KOLORY; i++) {
-        fprintf(f, "| %-13s | %4d |\n", nazwy_kolorow[i], r->wyprodukowane[i]);
-        suma_prod += r->wyprodukowane[i];
-    }
-    fprintf(f, "+---------------+------+\n");
-    fprintf(f, "| RAZEM         | %4d |\n", suma_prod);
-    fprintf(f, "+---------------+------+\n\n");
-
-    /* Sekcja POZOSTALE NA TASMIE */
-    fprintf(f, "--- POZOSTALE NA TASMIE ---\n");
-    int pozostale[KOLORY] = {0};
-    int suma_pozostale = 0;
-    for (int i = 0; i < SEGMENTY; i++) {
-        if (r->tasma.seg[i].zajety) {
-            pozostale[r->tasma.seg[i].t.kolor]++;
-            suma_pozostale++;
-        }
-    }
-    fprintf(f, "+---------------+------+\n");
-    fprintf(f, "| Kolor         | Szt. |\n");
-    fprintf(f, "+---------------+------+\n");
-    for (int i = 0; i < KOLORY; i++) {
-        if (pozostale[i] > 0) {
-            fprintf(f, "| %-13s | %4d |\n", nazwy_kolorow[i], pozostale[i]);
-        }
-    }
-    fprintf(f, "+---------------+------+\n");
-    fprintf(f, "| RAZEM         | %4d |\n", suma_pozostale);
-    fprintf(f, "+---------------+------+\n\n");
-
-    fprintf(f, "========================================\n");
-    fprintf(f, "        KONIEC RAPORTU\n");
-    fprintf(f, "========================================\n");
-
-    fclose(f);
-    printf("[OBSLUGA] Raport dzienny zapisany do raport_dzienny.txt\n");
-    zrzut_do_logu("OBSLUGA: Raport - %d transakcji, %d zl utargu, %d wyprodukowano, %d pozostalo",
-                  r->kasa.transakcje, r->kasa.suma_dzienna, suma_prod, suma_pozostale);
-}
-
-/* --- STRUKTURA LOKALNEJ KOLEJKI --- */
-typedef struct {
-    pid_t pid;
-    int group_priority; // Czy grupa ma priorytet (VIP)
-} wpis_kolejki;
-
-#define Q_SIZE 100
-
-// Kolejki
-wpis_kolejki queue_g1[Q_SIZE]; int q1_cnt = 0;
-wpis_kolejki queue_g2[Q_SIZE]; int q2_cnt = 0;
-wpis_kolejki queue_g3[Q_SIZE]; int q3_cnt = 0;
-wpis_kolejki queue_g4[Q_SIZE]; int q4_cnt = 0;
-
-void wstaw_do_kolejki(wpis_kolejki *q, int *cnt, pid_t pid, int priority) {
-    if (*cnt >= Q_SIZE) return;
-
-    int idx_wstawienia = *cnt; 
-
-    if (priority) {
-        // Jesli grupa ma priorytet, szukamy pierwszego BEZ priorytetu
-        for (int i = 0; i < *cnt; i++) {
-            if (q[i].group_priority == 0) {
-                idx_wstawienia = i;
-                break;
-            }
-        }
-    }
-
-    for (int i = *cnt; i > idx_wstawienia; i--) {
-        q[i] = q[i-1];
-    }
-
-    q[idx_wstawienia].pid = pid;
-    q[idx_wstawienia].group_priority = priority;
-    (*cnt)++;
-}
-
-void dodaj_do_kolejki(int rozmiar, int priority, pid_t pid) {
-    if (rozmiar == 1) wstaw_do_kolejki(queue_g1, &q1_cnt, pid, priority);
-    else if (rozmiar == 2) wstaw_do_kolejki(queue_g2, &q2_cnt, pid, priority);
-    else if (rozmiar == 3) wstaw_do_kolejki(queue_g3, &q3_cnt, pid, priority);
-    else if (rozmiar >= 4) wstaw_do_kolejki(queue_g4, &q4_cnt, pid, priority);
-}
-
-/*
- * Wysyła zaproszenie do klienta z przydzielonym miejscem.
- * Używa msgsnd() do wysłania komunikatu na PID klienta.
- */
-void zapros_klienta(int msg_id, wpis_kolejki *kolejka, int *cnt, int idx_w_kolejce, int nr_miejsca, int typ) {
-    pid_t pid = kolejka[idx_w_kolejce].pid;
-
-    struct komunikat zaproszenie;
-    zaproszenie.mtype = pid;
-    zaproszenie.numer_miejsca = nr_miejsca;
-    zaproszenie.typ_miejsca = typ;
-
-    /* Wysłanie komunikatu z obsługą błędów */
-    if (msgsnd(msg_id, &zaproszenie, sizeof(struct komunikat) - sizeof(long), 0) == -1) {
-        if (errno == EIDRM) {
-            /* Kolejka została usunięta - restauracja zamykana */
-            return;
-        }
-        perror("[OBSLUGA] msgsnd - blad wysylania zaproszenia");
-        return;
-    }
-
-    if (typ == 0) {
-        zrzut_do_logu("OBSLUGA: Przydzielono LADE %d dla PID %d", nr_miejsca, pid);
+    if (argc >= 6) {
+        moj_gid = atoi(argv[1]);
+        moja_grupa_size = atoi(argv[2]);
+        ja_jestem_vip = atoi(argv[3]);
+        moja_grupa_ma_priorytet = atoi(argv[4]);
+        ja_jestem_dziecko = atoi(argv[5]);
     } else {
-        zrzut_do_logu("OBSLUGA: Przydzielono STOLIK %d dla PID %d", nr_miejsca, pid);
+        fprintf(stderr, "[KLIENT %d] Blad: za malo argumentow (oczekiwano 5)\n", getpid());
+        exit(EXIT_FAILURE);
     }
 
-    /* Usunięcie klienta z kolejki */
-    for (int i = idx_w_kolejce; i < *cnt - 1; i++) {
-        kolejka[i] = kolejka[i + 1];
+    /* Walidacja ID grupy */
+    if (moj_gid < 0 || moj_gid >= MAX_GRUP) {
+        fprintf(stderr, "[KLIENT %d] Blad: niepoprawny ID grupy %d (max %d)\n",
+                getpid(), moj_gid, MAX_GRUP - 1);
+        exit(EXIT_FAILURE);
     }
-    (*cnt)--;
-}
 
-int main() {
-    printf("[OBSLUGA] Start managera sali + kasy\n");
-
-    /* Rejestracja handlera zamknięcia */
-    if (signal(SIGTERM, handler_zamkniecie) == SIG_ERR) {
-        perror("[OBSLUGA] signal(SIGTERM)");
+    /* Walidacja rozmiaru grupy */
+    if (moja_grupa_size < 1 || moja_grupa_size > 4) {
+        fprintf(stderr, "[KLIENT %d] Blad: niepoprawny rozmiar grupy %d (1-4)\n",
+                getpid(), moja_grupa_size);
         exit(EXIT_FAILURE);
     }
 
     /* Generowanie klucza IPC */
     key_t key = ftok("ipc_keyfile", 'C');
     if (key == -1) {
-        perror("[OBSLUGA] ftok");
+        perror("[KLIENT] ftok");
         exit(EXIT_FAILURE);
     }
 
-    /* Połączenie z istniejącymi zasobami IPC */
+    /* Połączenie z zasobami IPC */
     int shm = shmget(key, sizeof(struct restauracja), 0);
     if (shm == -1) {
-        perror("[OBSLUGA] shmget - nie mozna polaczyc z pamiecia dzielona");
+        perror("[KLIENT] shmget");
         exit(EXIT_FAILURE);
     }
 
     int sem = semget(key, 1, 0);
     if (sem == -1) {
-        perror("[OBSLUGA] semget - nie mozna polaczyc z semaforem");
+        perror("[KLIENT] semget");
         exit(EXIT_FAILURE);
     }
 
     int msg = msgget(key, 0);
     if (msg == -1) {
-        perror("[OBSLUGA] msgget - nie mozna polaczyc z kolejka komunikatow");
+        perror("[KLIENT] msgget");
         exit(EXIT_FAILURE);
     }
 
     /* Dołączenie do pamięci dzielonej */
     struct restauracja *r = shmat(shm, NULL, 0);
     if (r == (void *)-1) {
-        perror("[OBSLUGA] shmat - nie mozna dolaczyc pamieci dzielonej");
+        perror("[KLIENT] shmat");
         exit(EXIT_FAILURE);
     }
 
-    printf("[OBSLUGA] Polaczono z zasobami IPC (shm=%d, sem=%d, msg=%d)\n", shm, sem, msg);
-
-    /* Ustawienie zmiennej globalnej dla handlera */
+    // Ustawienie zmiennych globalnych dla handlera
     r_global = r;
+    sem_global = sem;
 
-    /* Inicjalizacja statystyk kasy */
+    int moj_slot_idx = -1;
+    /* Losowy limit talerzyków: MIN_TALERZYKI do MAX_TALERZYKI (wymaganie: 3-10) */
+    int do_zjedzenia = MIN_TALERZYKI + rand() % (MAX_TALERZYKI - MIN_TALERZYKI + 1);
+
+    /* Lokalne zliczanie zjedzonych talerzyków per kolor (do rachunku) */
+    int moje_talerzyki[KOLORY] = {0};
+
     lock(sem);
-    r->kasa.transakcje = 0;
-    r->kasa.suma_dzienna = 0;
-    for (int i = 0; i < KOLORY; i++) {
-        r->kasa.sprzedane_talerzyki[i] = 0;
-    }
-    for (int i = 0; i < MAX_GRUP; i++) {
-        r->grupa_zaplacila[i] = 0;
-        for (int j = 0; j < KOLORY; j++) {
-            r->grupa_talerzyki[i][j] = 0;
+    for (int i = 0; i < MAX_KLIENTOW; i++) {
+        if (!r->klienci[i].aktywny) {
+            r->klienci[i].aktywny = 1;
+            r->klienci[i].pid = getpid();
+            r->klienci[i].id_grupy = moj_gid;
+            r->klienci[i].limit = do_zjedzenia;
+            r->klienci[i].zjedzone = 0;
+            r->klienci[i].segment = -1; 
+            r->klienci[i].is_vip = ja_jestem_vip;
+            r->klienci[i].is_child = ja_jestem_dziecko;
+            /* Inicjalizacja liczników talerzyków */
+            for (int j = 0; j < KOLORY; j++) {
+                r->klienci[i].talerzyki[j] = 0;
+            }
+            moj_slot_idx = i;
+            break;
         }
     }
     unlock(sem);
+    
+    // Aktualizacja globalnego indeksu
+    moj_slot_idx_global = moj_slot_idx;
 
-    while (r->otwarta) {
-        /* 1. Odbierz nowe zgłoszenia klientów (non-blocking) */
-        struct komunikat buf;
-        ssize_t recv_result;
-        while ((recv_result = msgrcv(msg, &buf, sizeof(struct komunikat) - sizeof(long), 1, IPC_NOWAIT)) != -1) {
-            /* Walidacja danych przed dodaniem do kolejki */
-            if (buf.rozmiar_grupy >= 1 && buf.rozmiar_grupy <= 4 && buf.pid_nadawcy > 0) {
-                dodaj_do_kolejki(buf.rozmiar_grupy, buf.group_priority, buf.pid_nadawcy);
-            } else {
-                zrzut_do_logu("[OBSLUGA] Odrzucono niepoprawne zgloszenie: rozmiar=%d, pid=%d",
-                              buf.rozmiar_grupy, buf.pid_nadawcy);
-            }
-        }
-        /* Sprawdzenie błędu msgrcv (ENOMSG to normalne przy IPC_NOWAIT) */
-        if (recv_result == -1 && errno != ENOMSG && errno != EINTR) {
+    if(ja_jestem_vip) printf("[KLIENT %d] VIP z G=%d wchodzi!\n", getpid(), moj_gid);
+    else if(ja_jestem_dziecko) printf("[KLIENT %d] Dziecko z G=%d wchodzi!\n", getpid(), moj_gid);
+    else printf("[KLIENT %d] Klient z G=%d wchodzi.\n", getpid(), moj_gid);
+
+    int moj_segment = -1;
+    int typ_miejsca = -1;
+    int idx_miejsca = -1;
+    int jestem_liderem = 0;
+
+    lock(sem);
+    if (r->gdzie_siedzimy[moj_gid] == -1) {
+        r->gdzie_siedzimy[moj_gid] = -2;
+        jestem_liderem = 1;
+    }
+    unlock(sem);
+
+    if (jestem_liderem) {
+        /* Lider wysyła zgłoszenie do obsługi */
+        struct komunikat zapytanie;
+        zapytanie.mtype = 1;
+        zapytanie.pid_nadawcy = getpid();
+        zapytanie.rozmiar_grupy = moja_grupa_size;
+        zapytanie.group_priority = moja_grupa_ma_priorytet;
+
+        if (msgsnd(msg, &zapytanie, sizeof(struct komunikat) - sizeof(long), 0) == -1) {
             if (errno == EIDRM) {
                 /* Kolejka usunięta - restauracja zamykana */
-                break;
+                zrzut_do_logu("KLIENT %d: Restauracja zamknieta podczas rejestracji", getpid());
+                shmdt(r);
+                exit(0);
             }
-            perror("[OBSLUGA] msgrcv");
+            perror("[KLIENT] msgsnd - blad wysylania zgloszenia");
+            shmdt(r);
+            exit(EXIT_FAILURE);
         }
 
-        /* 1b. Odbierz żądania rachunków (KASA) */
-        struct komunikat_kasa_req kasa_req;
-        while (msgrcv(msg, &kasa_req, sizeof(kasa_req) - sizeof(long),
-                      -(MSG_KASA_REQ + MAX_GRUP), IPC_NOWAIT) != -1) {
+        /* Oczekiwanie na odpowiedź z przydziałem miejsca */
+        struct komunikat odpowiedz;
+        if (msgrcv(msg, &odpowiedz, sizeof(struct komunikat) - sizeof(long), getpid(), 0) == -1) {
+            if (errno == EIDRM || errno == EINTR) {
+                /* Kolejka usunięta lub przerwane sygnałem */
+                zrzut_do_logu("KLIENT %d: Przerywam oczekiwanie na miejsce", getpid());
+                shmdt(r);
+                exit(0);
+            }
+            perror("[KLIENT] msgrcv - blad odbierania odpowiedzi");
+            shmdt(r);
+            exit(EXIT_FAILURE);
+        }
 
-            int id_grupy = kasa_req.id_grupy;
-            pid_t pid_lidera = kasa_req.pid_lidera;
+        typ_miejsca = odpowiedz.typ_miejsca;
+        idx_miejsca = odpowiedz.numer_miejsca;
 
-            /* Obliczenie sumy rachunku */
-            int suma = oblicz_rachunek(kasa_req.talerzyki);
+        zrzut_do_logu("KLIENT PID=%d (G=%d): Otrzymalem miejsce nr %d (Typ: %d)",
+                      getpid(), moj_gid, idx_miejsca, typ_miejsca);
 
-            /* Aktualizacja statystyk kasy */
+        lock(sem);
+        r->typ_miejsca_grupy[moj_gid] = typ_miejsca;
+        r->gdzie_siedzimy[moj_gid] = idx_miejsca; 
+        
+        if (typ_miejsca == 0) {
+            moj_segment = r->lada[idx_miejsca].segment;
+        } else {
+            moj_segment = r->stoliki[idx_miejsca].segment;
+            r->stoliki[idx_miejsca].id_grupy = moj_gid;
+        }
+        unlock(sem);
+    } 
+    else {
+        while (1) {
             lock(sem);
-            r->kasa.transakcje++;
-            r->kasa.suma_dzienna += suma;
-            for (int i = 0; i < KOLORY; i++) {
-                r->kasa.sprzedane_talerzyki[i] += kasa_req.talerzyki[i];
-            }
-            r->grupa_zaplacila[id_grupy] = 1;
-            sprintf(r->info, "KASA: Grupa %d zaplacila %d zl", id_grupy, suma);
-            unlock(sem);
-
-            /* Wysłanie odpowiedzi z rachunkiem */
-            struct komunikat_kasa_resp kasa_resp;
-            kasa_resp.mtype = pid_lidera;
-            kasa_resp.suma = suma;
-            for (int i = 0; i < KOLORY; i++) {
-                kasa_resp.talerzyki[i] = kasa_req.talerzyki[i];
-            }
-
-            if (msgsnd(msg, &kasa_resp, sizeof(kasa_resp) - sizeof(long), 0) == -1) {
-                if (errno != EIDRM) {
-                    perror("[OBSLUGA/KASA] msgsnd odpowiedz");
+            int status = r->gdzie_siedzimy[moj_gid];
+            if (status >= 0) {
+                int baza = status;
+                typ_miejsca = r->typ_miejsca_grupy[moj_gid];
+                
+                if (typ_miejsca == 0) { 
+                    if (moja_grupa_size == 2) idx_miejsca = baza + 1;
+                    else idx_miejsca = baza;
+                    moj_segment = r->lada[idx_miejsca].segment;
+                } 
+                else { 
+                    idx_miejsca = baza;
+                    moj_segment = r->stoliki[idx_miejsca].segment;
                 }
-            } else {
-                zrzut_do_logu("KASA: Grupa %d (lider PID=%d) zaplacila %d zl",
-                              id_grupy, pid_lidera, suma);
+                unlock(sem);
+                break; 
+            }
+            unlock(sem);
+            usleep(100000); 
+        }
+    }
+    
+    lock(sem);
+    if (moj_slot_idx != -1) r->klienci[moj_slot_idx].segment = moj_segment;
+    unlock(sem);
+
+    int zjedzone = 0;
+    int oczekuje_na_specjalne = 0;
+    
+    while (r->otwarta && zjedzone < do_zjedzenia) {
+        if (!oczekuje_na_specjalne) {
+            if (moj_segment > 15) {
+                if (!ja_jestem_dziecko && rand() % 5000 < moj_segment) {
+                    lock(sem);
+                    for(int i=0; i<MAX_ZAMOWIEN; i++) {
+                        if(!r->zamowienia[i].aktywne) {
+                            int zamowiony_typ = 3 + (rand() % 3);
+                            r->zamowienia[i].pid_klienta = getpid();
+                            r->zamowienia[i].typ_dania = zamowiony_typ;
+                            r->zamowienia[i].aktywne = 1;
+                            oczekuje_na_specjalne = 1;
+                            if(moj_slot_idx != -1) r->klienci[moj_slot_idx].czeka_na_specjalne = 1;
+                            sprintf(r->info, "KLIENT %d (G%d Seg%d) zamowil %s!", getpid(), moj_gid, moj_segment, nazwy_kolorow[zamowiony_typ]);
+                            break;
+                        }
+                    }
+                    unlock(sem);
+                }
             }
         }
 
         lock(sem);
-        
-        // 2. LOGIKA TETRIS 
-        // G4
-        if (q4_cnt > 0) {
-            for (int i=6; i<10; i++) { 
-                if (r->stoliki[i].ile_osob == 0) {
-                    r->stoliki[i].ile_osob = 4; zapros_klienta(msg, queue_g4, &q4_cnt, 0, i, 1);
-                    if(q4_cnt == 0) break;
-                }
-            }
-        }
-        // G3
-        if (q3_cnt > 0) {
-            for (int i=3; i<6; i++) { 
-                if (r->stoliki[i].ile_osob == 0) {
-                    r->stoliki[i].ile_osob = 3; zapros_klienta(msg, queue_g3, &q3_cnt, 0, i, 1);
-                    if(q3_cnt == 0) break;
-                }
-            }
-            if (q3_cnt > 0 && q4_cnt == 0) { 
-                for (int i=6; i<10; i++) {
-                     if (r->stoliki[i].ile_osob == 0) {
-                        r->stoliki[i].ile_osob = 3; zapros_klienta(msg, queue_g3, &q3_cnt, 0, i, 1);
-                        if(q3_cnt == 0) break;
-                    }
-                }
-            }
-        }
-        // G2
-        if (q2_cnt > 0) {
-            for (int i = 0; i < LADA_MIEJSC - 1; i++) { 
-                if (r->lada[i].zajete == 0 && r->lada[i+1].zajete == 0) {
-                    r->lada[i].zajete=1; r->lada[i+1].zajete=1;
-                    zapros_klienta(msg, queue_g2, &q2_cnt, 0, i, 0); 
-                    if(q2_cnt == 0) break;
-                }
-            }
-            if (q2_cnt > 0) { 
-                for (int i=0; i<3; i++) { 
-                    if (r->stoliki[i].ile_osob==0) { r->stoliki[i].ile_osob=2; zapros_klienta(msg, queue_g2, &q2_cnt, 0, i, 1); if(q2_cnt==0) break;}
-                }
-            }
-            if (q2_cnt > 0 && q3_cnt == 0) { 
-                for (int i=3; i<6; i++) {
-                    if (r->stoliki[i].ile_osob==0) { r->stoliki[i].ile_osob=2; zapros_klienta(msg, queue_g2, &q2_cnt, 0, i, 1); if(q2_cnt==0) break;}
-                }
-            }
-            if (q2_cnt > 0) { 
-                for (int i=6; i<10; i++) {
-                    int wolne = r->stoliki[i].pojemnosc - r->stoliki[i].ile_osob;
-                    int dosiadka = (r->stoliki[i].ile_osob > 0);
-                    int pusty_ok = (r->stoliki[i].ile_osob == 0 && q4_cnt==0 && q3_cnt==0);
-                    if (wolne >= 2 && (dosiadka || pusty_ok)) {
-                        r->stoliki[i].ile_osob += 2; zapros_klienta(msg, queue_g2, &q2_cnt, 0, i, 1);
-                        if(q2_cnt == 0) break;
-                    }
-                }
-            }
-        }
-        // G1
-        if (q1_cnt > 0) {
-            for (int i=0; i<LADA_MIEJSC; i++) {
-                if (r->lada[i].zajete == 0) {
-                    r->lada[i].zajete = 1; zapros_klienta(msg, queue_g1, &q1_cnt, 0, i, 0); 
-                    if(q1_cnt == 0) break;
-                }
-            }
-            if (q1_cnt > 0) {
-                for (int i=0; i<STOLIKI; i++) {
-                    if (r->stoliki[i].ile_osob < r->stoliki[i].pojemnosc) {
-                        int pusty = (r->stoliki[i].ile_osob == 0);
-                        int blokada = 0;
-                        if (pusty && (q4_cnt>0 || q3_cnt>0 || q2_cnt>0)) blokada = 1; 
-                        
-                        if (!blokada) {
-                            r->stoliki[i].ile_osob += 1; zapros_klienta(msg, queue_g1, &q1_cnt, 0, i, 1);
-                            if(q1_cnt == 0) break;
-                        }
-                    }
-                }
-            }
-        }
-        
-        unlock(sem);
+        if (r->tasma.seg[moj_segment].zajety) {
+            struct talerzyk t = r->tasma.seg[moj_segment].t;
+            int czy_jem = 0;
 
-        // 3. WYSWIETLANIE
-        system("clear");
-        printf("\n=== MONITOR SALI I KOLEJEK ===\n");
-        printf("Kolejki: G4:[%d:%d] G3:[%d:%d] G2:[%d:%d] G1:[%d:%d]\n", 
-               q4_cnt, queue_g4[0].group_priority, 
-               q3_cnt, queue_g3[0].group_priority, 
-               q2_cnt, queue_g2[0].group_priority, 
-               q1_cnt, queue_g1[0].group_priority);
-        printf("---------------------------------------------------------------------------------\n");
-        printf("| SEG |       MIEJSCE       |          NA TASMIE           |      KLIENCI       \n");
-        printf("---------------------------------------------------------------------------------\n");
-
-        for (int seg = 0; seg < SEGMENTY; seg++) {
-            printf("| %02d  | ", seg);
-            char bufor_miejsca[30];
-            if (seg == 0) sprintf(bufor_miejsca, "KUCHARZ");
-            else if (seg >= 1 && seg <= 9) {
-                int idx = seg - 1;
-                sprintf(bufor_miejsca, "LADA %d %s", idx, r->lada[idx].zajete ? "(ZAJ)" : "(wol)");
+            if (oczekuje_na_specjalne) {
+                if (t.id_odbiorcy == getpid()) {
+                    sprintf(r->info, ">>> KLIENT %d ODEBRAL %s!", getpid(), nazwy_kolorow[t.kolor]);
+                    czy_jem = 1; oczekuje_na_specjalne = 0;
+                    if(moj_slot_idx != -1) r->klienci[moj_slot_idx].czeka_na_specjalne = 0;
+                }
             } else {
-                int idx = seg - 10;
-                sprintf(bufor_miejsca, "STOL %d (%d/%d)", idx, r->stoliki[idx].ile_osob, r->stoliki[idx].pojemnosc);
+                if (t.id_odbiorcy == -1 && rand() % 100 < 60) czy_jem = 1;
             }
-            printf("%-18s | ", bufor_miejsca);
 
-            char bufor_jedzenia[40];
-            if (r->tasma.seg[seg].zajety) {
-                struct talerzyk t = r->tasma.seg[seg].t;
-                if(t.id_odbiorcy != -1) sprintf(bufor_jedzenia, "%s($%d)->%d", nazwy_kolorow[t.kolor], t.cena, t.id_odbiorcy);
-                else sprintf(bufor_jedzenia, "%s ($%d)", nazwy_kolorow[t.kolor], t.cena);
-            } else sprintf(bufor_jedzenia, "---");
-            printf("%-20s | ", bufor_jedzenia);
-
-            int found = 0;
-            if (seg > 0) { 
-                for (int i = 0; i < MAX_KLIENTOW; i++) {
-                    struct klient_info *k = &r->klienci[i];
-                    if (!k->aktywny || k->segment != seg) continue;
-                    if (found) printf(", ");
-                    
-                    char status[15] = "";
-                    if (k->is_vip) strcat(status, "VIP ");
-                    if (k->is_child) strcat(status, "JUNIOR ");
-                    
-                    printf("PID=%d %sG=%d (%d/%d)", k->pid, status, k->id_grupy, k->zjedzone, k->limit);
-                    found = 1;
+            if (czy_jem) {
+                r->tasma.seg[moj_segment].zajety = 0;
+                r->sprzedane[t.kolor]++;
+                zjedzone++;
+                /* Zliczanie talerzyków per kolor - lokalnie i w SHM */
+                moje_talerzyki[t.kolor]++;
+                if (moj_slot_idx != -1) {
+                    r->klienci[moj_slot_idx].zjedzone = zjedzone;
+                    r->klienci[moj_slot_idx].talerzyki[t.kolor]++;
                 }
+                /* Aktualizacja licznika grupy */
+                r->grupa_talerzyki[moj_gid][t.kolor]++;
+                printf("[KLIENT %d] Zjadl %s\n", getpid(), nazwy_kolorow[t.kolor]);
             }
-            printf("\n");
         }
-        printf("---------------------------------------------------------------------------------\n");
-        printf("[KASA] Transakcje: %d | Utarg: %d zl\n", r->kasa.transakcje, r->kasa.suma_dzienna);
-        printf("[INFO]: %s\n", r->info);
-
-        sleep(1);
+        unlock(sem);
+        sleep(1); 
     }
 
-    printf("[OBSLUGA] Restauracja zamknieta. Generowanie raportu...\n");
+    lock(sem);
+    r->grupa_zjedzone_cnt[moj_gid]++;
+    unlock(sem);
 
-    /* Generowanie podsumowania końcowego */
-    generuj_podsumowanie(r);
+    int moge_wyjsc = 0;
+    while (r->otwarta && !moge_wyjsc) {
+        lock(sem);
+        if (r->grupa_zjedzone_cnt[moj_gid] >= moja_grupa_size) moge_wyjsc = 1;
+        unlock(sem);
+        if (!moge_wyjsc) sleep(1);
+    }
+
+    /* === PŁATNOŚĆ - tylko lider płaci za całą grupę === */
+    if (jestem_liderem && r->otwarta) {
+        lock(sem);
+        int czy_zaplacona = r->grupa_zaplacila[moj_gid];
+        unlock(sem);
+
+        if (!czy_zaplacona) {
+            /* Przygotowanie żądania rachunku */
+            struct komunikat_kasa_req req;
+            req.mtype = MSG_KASA_REQ + moj_gid;
+            req.pid_lidera = getpid();
+            req.id_grupy = moj_gid;
+
+            /* Kopiowanie talerzyków grupy */
+            lock(sem);
+            for (int i = 0; i < KOLORY; i++) {
+                req.talerzyki[i] = r->grupa_talerzyki[moj_gid][i];
+            }
+            unlock(sem);
+
+            /* Wysłanie żądania do kasy */
+            if (msgsnd(msg, &req, sizeof(struct komunikat_kasa_req) - sizeof(long), 0) == -1) {
+                if (errno != EIDRM) {
+                    perror("[KLIENT] msgsnd - blad wysylania zadania rachunku");
+                }
+            } else {
+                /* Oczekiwanie na rachunek */
+                struct komunikat_kasa_resp resp;
+                if (msgrcv(msg, &resp, sizeof(struct komunikat_kasa_resp) - sizeof(long), getpid(), 0) == -1) {
+                    if (errno != EIDRM && errno != EINTR) {
+                        perror("[KLIENT] msgrcv - blad odbierania rachunku");
+                    }
+                } else {
+                    printf("[KLIENT %d] Rachunek dla grupy %d: %d zl\n", getpid(), moj_gid, resp.suma);
+                    zrzut_do_logu("KLIENT %d (G=%d): Zaplacil rachunek %d zl", getpid(), moj_gid, resp.suma);
+
+                    lock(sem);
+                    r->grupa_zaplacila[moj_gid] = 1;
+                    unlock(sem);
+                }
+            }
+        }
+    }
+
+    lock(sem);
+    if (typ_miejsca == 0) {
+        r->lada[idx_miejsca].zajete = 0;
+        zrzut_do_logu("KLIENT PID=%d (G=%d): Zwolnilem LADE nr %d", getpid(), moj_gid, idx_miejsca);
+        if (r->grupa_zjedzone_cnt[moj_gid] >= moja_grupa_size) {
+             r->gdzie_siedzimy[moj_gid] = -1;
+        }
+    } else {
+        r->stoliki[idx_miejsca].ile_osob--;
+        if (r->stoliki[idx_miejsca].ile_osob == 0) {
+            r->stoliki[idx_miejsca].id_grupy = -1;
+            r->gdzie_siedzimy[moj_gid] = -1; 
+            zrzut_do_logu("KLIENT PID=%d (G=%d): Zwolnilem STOLIK nr %d (Typ: 1)", getpid(), moj_gid, idx_miejsca);
+        }
+    }
+    if (moj_slot_idx != -1) {
+        r->klienci[moj_slot_idx].aktywny = 0;
+    }
+    unlock(sem);
 
     /* Odłączenie od pamięci dzielonej */
     if (shmdt(r) == -1) {
-        perror("[OBSLUGA] shmdt");
+        perror("[KLIENT] shmdt");
     }
 
-    printf("[OBSLUGA] Koniec pracy.\n");
+    zrzut_do_logu("KLIENT %d (G=%d): Wychodzi z restauracji", getpid(), moj_gid);
     return 0;
 }
