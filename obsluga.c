@@ -1,3 +1,12 @@
+/*
+ * obsluga.c - Proces obsługi restauracji (manager sali)
+ *
+ * Odpowiada za:
+ * - Przyjmowanie zgłoszeń klientów przez kolejkę komunikatów
+ * - Przydzielanie miejsc przy ladzie i stolikach (algorytm "Tetris")
+ * - Wyświetlanie monitora stanu sali w czasie rzeczywistym
+ */
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <unistd.h>
@@ -9,7 +18,7 @@
 
 #include "wspolne.h"
 
-// --- STRUKTURA LOKALNEJ KOLEJKI ---
+/* --- STRUKTURA LOKALNEJ KOLEJKI --- */
 typedef struct {
     pid_t pid;
     int group_priority; // Czy grupa ma priorytet (VIP)
@@ -54,40 +63,99 @@ void dodaj_do_kolejki(int rozmiar, int priority, pid_t pid) {
     else if (rozmiar >= 4) wstaw_do_kolejki(queue_g4, &q4_cnt, pid, priority);
 }
 
+/*
+ * Wysyła zaproszenie do klienta z przydzielonym miejscem.
+ * Używa msgsnd() do wysłania komunikatu na PID klienta.
+ */
 void zapros_klienta(int msg_id, wpis_kolejki *kolejka, int *cnt, int idx_w_kolejce, int nr_miejsca, int typ) {
     pid_t pid = kolejka[idx_w_kolejce].pid;
-    
+
     struct komunikat zaproszenie;
-    zaproszenie.mtype = pid; 
+    zaproszenie.mtype = pid;
     zaproszenie.numer_miejsca = nr_miejsca;
     zaproszenie.typ_miejsca = typ;
-    msgsnd(msg_id, &zaproszenie, sizeof(struct komunikat) - sizeof(long), 0);
-    
-    if (typ == 0) zrzut_do_logu("OBSLUGA: Przydzielono LADE %d dla PID %d", nr_miejsca, pid);
-    else zrzut_do_logu("OBSLUGA: Przydzielono STOLIK %d dla PID %d", nr_miejsca, pid);
 
+    /* Wysłanie komunikatu z obsługą błędów */
+    if (msgsnd(msg_id, &zaproszenie, sizeof(struct komunikat) - sizeof(long), 0) == -1) {
+        if (errno == EIDRM) {
+            /* Kolejka została usunięta - restauracja zamykana */
+            return;
+        }
+        perror("[OBSLUGA] msgsnd - blad wysylania zaproszenia");
+        return;
+    }
+
+    if (typ == 0) {
+        zrzut_do_logu("OBSLUGA: Przydzielono LADE %d dla PID %d", nr_miejsca, pid);
+    } else {
+        zrzut_do_logu("OBSLUGA: Przydzielono STOLIK %d dla PID %d", nr_miejsca, pid);
+    }
+
+    /* Usunięcie klienta z kolejki */
     for (int i = idx_w_kolejce; i < *cnt - 1; i++) {
-        kolejka[i] = kolejka[i+1];
+        kolejka[i] = kolejka[i + 1];
     }
     (*cnt)--;
 }
 
 int main() {
-    key_t key = ftok("ipc_keyfile", 'C');
-    int shm = shmget(key, sizeof(struct restauracja), 0);
-    int sem = semget(key, 1, 0);
-    int msg = msgget(key, 0);
-    if (shm == -1 || sem == -1 || msg == -1) exit(1);
-    struct restauracja *r = shmat(shm, NULL, 0);
-
     printf("[OBSLUGA] Start managera sali\n");
 
+    /* Generowanie klucza IPC */
+    key_t key = ftok("ipc_keyfile", 'C');
+    if (key == -1) {
+        perror("[OBSLUGA] ftok");
+        exit(EXIT_FAILURE);
+    }
+
+    /* Połączenie z istniejącymi zasobami IPC */
+    int shm = shmget(key, sizeof(struct restauracja), 0);
+    if (shm == -1) {
+        perror("[OBSLUGA] shmget - nie mozna polaczyc z pamiecia dzielona");
+        exit(EXIT_FAILURE);
+    }
+
+    int sem = semget(key, 1, 0);
+    if (sem == -1) {
+        perror("[OBSLUGA] semget - nie mozna polaczyc z semaforem");
+        exit(EXIT_FAILURE);
+    }
+
+    int msg = msgget(key, 0);
+    if (msg == -1) {
+        perror("[OBSLUGA] msgget - nie mozna polaczyc z kolejka komunikatow");
+        exit(EXIT_FAILURE);
+    }
+
+    /* Dołączenie do pamięci dzielonej */
+    struct restauracja *r = shmat(shm, NULL, 0);
+    if (r == (void *)-1) {
+        perror("[OBSLUGA] shmat - nie mozna dolaczyc pamieci dzielonej");
+        exit(EXIT_FAILURE);
+    }
+
+    printf("[OBSLUGA] Polaczono z zasobami IPC (shm=%d, sem=%d, msg=%d)\n", shm, sem, msg);
+
     while (r->otwarta) {
-        // 1. Odbierz nowe zgloszenia
+        /* 1. Odbierz nowe zgłoszenia klientów (non-blocking) */
         struct komunikat buf;
-        while (msgrcv(msg, &buf, sizeof(struct komunikat)-sizeof(long), 1, IPC_NOWAIT) != -1) {
-            // Przekazujemy group_priority do kolejki
-            dodaj_do_kolejki(buf.rozmiar_grupy, buf.group_priority, buf.pid_nadawcy);
+        ssize_t recv_result;
+        while ((recv_result = msgrcv(msg, &buf, sizeof(struct komunikat) - sizeof(long), 1, IPC_NOWAIT)) != -1) {
+            /* Walidacja danych przed dodaniem do kolejki */
+            if (buf.rozmiar_grupy >= 1 && buf.rozmiar_grupy <= 4 && buf.pid_nadawcy > 0) {
+                dodaj_do_kolejki(buf.rozmiar_grupy, buf.group_priority, buf.pid_nadawcy);
+            } else {
+                zrzut_do_logu("[OBSLUGA] Odrzucono niepoprawne zgloszenie: rozmiar=%d, pid=%d",
+                              buf.rozmiar_grupy, buf.pid_nadawcy);
+            }
+        }
+        /* Sprawdzenie błędu msgrcv (ENOMSG to normalne przy IPC_NOWAIT) */
+        if (recv_result == -1 && errno != ENOMSG && errno != EINTR) {
+            if (errno == EIDRM) {
+                /* Kolejka usunięta - restauracja zamykana */
+                break;
+            }
+            perror("[OBSLUGA] msgrcv");
         }
 
         lock(sem);
@@ -229,8 +297,15 @@ int main() {
         printf("---------------------------------------------------------------------------------\n");
         printf("[INFO]: %s\n", r->info);
 
-        sleep(1); 
+        sleep(1);
     }
-    shmdt(r);
+
+    printf("[OBSLUGA] Restauracja zamknieta. Konczenie pracy.\n");
+
+    /* Odłączenie od pamięci dzielonej */
+    if (shmdt(r) == -1) {
+        perror("[OBSLUGA] shmdt");
+    }
+
     return 0;
 }

@@ -1,3 +1,13 @@
+/*
+ * klient.c - Proces klienta restauracji
+ *
+ * Odpowiada za:
+ * - Rejestrację w systemie i oczekiwanie na miejsce
+ * - Jedzenie potraw z taśmy
+ * - Składanie zamówień specjalnych
+ * - Synchronizację z innymi członkami grupy
+ */
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <unistd.h>
@@ -11,17 +21,22 @@
 
 #include "wspolne.h"
 
-
+/* Zmienne globalne do sprzątania w handlerze sygnału */
 struct restauracja *r_global = NULL;
 int moj_slot_idx_global = -1;
 int sem_global = -1;
 
+/*
+ * Handler sygnału SIGTERM - ewakuacja klienta.
+ * Zwalnia slot w tablicy klientów i kończy proces.
+ */
 void handler_ewakuacja(int sig) {
+    (void)sig; /* Suppress unused parameter warning */
+
     if (r_global != NULL && moj_slot_idx_global != -1 && sem_global != -1) {
         lock(sem_global);
         r_global->klienci[moj_slot_idx_global].aktywny = 0;
         unlock(sem_global);
-        
     }
     zrzut_do_logu("KLIENT %d: EWAKUACJA! Uciekam!", getpid());
     exit(0);
@@ -29,11 +44,16 @@ void handler_ewakuacja(int sig) {
 
 int main(int argc, char *argv[]) {
     srand(getpid() ^ time(NULL));
-    signal(SIGTERM, handler_ewakuacja); 
 
+    /* Rejestracja handlera ewakuacji */
+    if (signal(SIGTERM, handler_ewakuacja) == SIG_ERR) {
+        perror("[KLIENT] signal(SIGTERM)");
+        exit(EXIT_FAILURE);
+    }
+
+    /* Parsowanie argumentów */
     int moj_gid = 0;
     int moja_grupa_size = 1;
-    
     int ja_jestem_vip = 0;
     int moja_grupa_ma_priorytet = 0;
     int ja_jestem_dziecko = 0;
@@ -44,18 +64,59 @@ int main(int argc, char *argv[]) {
         ja_jestem_vip = atoi(argv[3]);
         moja_grupa_ma_priorytet = atoi(argv[4]);
         ja_jestem_dziecko = atoi(argv[5]);
+    } else {
+        fprintf(stderr, "[KLIENT %d] Blad: za malo argumentow (oczekiwano 5)\n", getpid());
+        exit(EXIT_FAILURE);
     }
-    
-    if (moj_gid >= MAX_GRUP) exit(1);
 
+    /* Walidacja ID grupy */
+    if (moj_gid < 0 || moj_gid >= MAX_GRUP) {
+        fprintf(stderr, "[KLIENT %d] Blad: niepoprawny ID grupy %d (max %d)\n",
+                getpid(), moj_gid, MAX_GRUP - 1);
+        exit(EXIT_FAILURE);
+    }
+
+    /* Walidacja rozmiaru grupy */
+    if (moja_grupa_size < 1 || moja_grupa_size > 4) {
+        fprintf(stderr, "[KLIENT %d] Blad: niepoprawny rozmiar grupy %d (1-4)\n",
+                getpid(), moja_grupa_size);
+        exit(EXIT_FAILURE);
+    }
+
+    /* Generowanie klucza IPC */
     key_t key = ftok("ipc_keyfile", 'C');
-    int shm = shmget(key, sizeof(struct restauracja), 0);
-    int sem = semget(key, 1, 0);
-    int msg = msgget(key, 0); 
-    if (shm == -1 || sem == -1 || msg == -1) exit(1);
-    struct restauracja *r = shmat(shm, NULL, 0);
+    if (key == -1) {
+        perror("[KLIENT] ftok");
+        exit(EXIT_FAILURE);
+    }
 
-    
+    /* Połączenie z zasobami IPC */
+    int shm = shmget(key, sizeof(struct restauracja), 0);
+    if (shm == -1) {
+        perror("[KLIENT] shmget");
+        exit(EXIT_FAILURE);
+    }
+
+    int sem = semget(key, 1, 0);
+    if (sem == -1) {
+        perror("[KLIENT] semget");
+        exit(EXIT_FAILURE);
+    }
+
+    int msg = msgget(key, 0);
+    if (msg == -1) {
+        perror("[KLIENT] msgget");
+        exit(EXIT_FAILURE);
+    }
+
+    /* Dołączenie do pamięci dzielonej */
+    struct restauracja *r = shmat(shm, NULL, 0);
+    if (r == (void *)-1) {
+        perror("[KLIENT] shmat");
+        exit(EXIT_FAILURE);
+    }
+
+    // Ustawienie zmiennych globalnych dla handlera
     r_global = r;
     sem_global = sem;
 
@@ -79,7 +140,7 @@ int main(int argc, char *argv[]) {
     }
     unlock(sem);
     
-    
+    // Aktualizacja globalnego indeksu
     moj_slot_idx_global = moj_slot_idx;
 
     if(ja_jestem_vip) printf("[KLIENT %d] VIP z G=%d wchodzi!\n", getpid(), moj_gid);
@@ -99,21 +160,44 @@ int main(int argc, char *argv[]) {
     unlock(sem);
 
     if (jestem_liderem) {
+        /* Lider wysyła zgłoszenie do obsługi */
         struct komunikat zapytanie;
-        zapytanie.mtype = 1; 
+        zapytanie.mtype = 1;
         zapytanie.pid_nadawcy = getpid();
         zapytanie.rozmiar_grupy = moja_grupa_size;
         zapytanie.group_priority = moja_grupa_ma_priorytet;
-        
-        msgsnd(msg, &zapytanie, sizeof(struct komunikat) - sizeof(long), 0);
 
+        if (msgsnd(msg, &zapytanie, sizeof(struct komunikat) - sizeof(long), 0) == -1) {
+            if (errno == EIDRM) {
+                /* Kolejka usunięta - restauracja zamykana */
+                zrzut_do_logu("KLIENT %d: Restauracja zamknieta podczas rejestracji", getpid());
+                shmdt(r);
+                exit(0);
+            }
+            perror("[KLIENT] msgsnd - blad wysylania zgloszenia");
+            shmdt(r);
+            exit(EXIT_FAILURE);
+        }
+
+        /* Oczekiwanie na odpowiedź z przydziałem miejsca */
         struct komunikat odpowiedz;
-        msgrcv(msg, &odpowiedz, sizeof(struct komunikat) - sizeof(long), getpid(), 0);
+        if (msgrcv(msg, &odpowiedz, sizeof(struct komunikat) - sizeof(long), getpid(), 0) == -1) {
+            if (errno == EIDRM || errno == EINTR) {
+                /* Kolejka usunięta lub przerwane sygnałem */
+                zrzut_do_logu("KLIENT %d: Przerywam oczekiwanie na miejsce", getpid());
+                shmdt(r);
+                exit(0);
+            }
+            perror("[KLIENT] msgrcv - blad odbierania odpowiedzi");
+            shmdt(r);
+            exit(EXIT_FAILURE);
+        }
 
         typ_miejsca = odpowiedz.typ_miejsca;
         idx_miejsca = odpowiedz.numer_miejsca;
-        
-        zrzut_do_logu("KLIENT PID=%d (G=%d): Otrzymalem miejsce nr %d (Typ: %d)", getpid(), moj_gid, idx_miejsca, typ_miejsca);
+
+        zrzut_do_logu("KLIENT PID=%d (G=%d): Otrzymalem miejsce nr %d (Typ: %d)",
+                      getpid(), moj_gid, idx_miejsca, typ_miejsca);
 
         lock(sem);
         r->typ_miejsca_grupy[moj_gid] = typ_miejsca;
@@ -235,8 +319,16 @@ int main(int argc, char *argv[]) {
             zrzut_do_logu("KLIENT PID=%d (G=%d): Zwolnilem STOLIK nr %d (Typ: 1)", getpid(), moj_gid, idx_miejsca);
         }
     }
-    if (moj_slot_idx != -1) r->klienci[moj_slot_idx].aktywny = 0;
+    if (moj_slot_idx != -1) {
+        r->klienci[moj_slot_idx].aktywny = 0;
+    }
     unlock(sem);
-    shmdt(r);
+
+    /* Odłączenie od pamięci dzielonej */
+    if (shmdt(r) == -1) {
+        perror("[KLIENT] shmdt");
+    }
+
+    zrzut_do_logu("KLIENT %d (G=%d): Wychodzi z restauracji", getpid(), moj_gid);
     return 0;
 }
