@@ -1,3 +1,12 @@
+/*
+ * kucharz.c - Proces kucharza restauracji
+ *
+ * Odpowiada za:
+ * - Produkcję dań podstawowych (losowych) i specjalnych (na zamówienie)
+ * - Umieszczanie talerzyków na taśmie (segment 0)
+ * - Reagowanie na sygnały kierownika (SIGUSR1/SIGUSR2)
+ */
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <unistd.h>
@@ -10,32 +19,75 @@
 
 #include "wspolne.h"
 
-// Zmienna globalna kontrolujaca predkosc (w mikrosekundach)
-// Domyslnie 1 sekunda = 1000000 us
+/*
+ * Zmienna globalna kontrolująca prędkość produkcji (w mikrosekundach).
+ * volatile - może być zmieniana przez handlery sygnałów.
+ * Domyślnie 1 sekunda = 1000000 us
+ */
 volatile int delay = 1000000;
 
+/*
+ * Handler sygnału SIGUSR1 - przyspieszenie produkcji 2x.
+ * Zgodne z wymaganiem: "Na polecenie kierownika (sygnał 1) obsługa
+ * przyśpiesza dwukrotnie wydawanie dań z kuchni."
+ */
 void handler_szybciej(int sig) {
-    delay = 500000; // 0.5s (2x szybciej)
-    // Nie uzywamy printf w handlerach (unsafe), ale w symulacji ujdzie
+    (void)sig;
+    delay = 500000; /* 0.5s (2x szybciej) */
 }
 
+/*
+ * Handler sygnału SIGUSR2 - spowolnienie produkcji o 50%.
+ * Zgodne z wymaganiem: "Na polecenie kierownika (sygnał 2) obsługa
+ * zmniejsza o 50% ilość wydawanych dań z kuchni."
+ */
 void handler_wolniej(int sig) {
-    delay = 2000000; // 2.0s (50% wolniej / ilosci)
+    (void)sig; /* Suppress unused parameter warning */
+    delay = 2000000; /* 2.0s (50% wolniej) */
 }
 
 int main() {
+    printf("[KUCHARZ] Start procesu kucharza (PID=%d)\n", getpid());
     srand(getpid() ^ time(NULL));
 
-    // Rejestracja sygnalow
-    signal(SIGUSR1, handler_szybciej);
-    signal(SIGUSR2, handler_wolniej);
+    /* Rejestracja handlerów sygnałów */
+    if (signal(SIGUSR1, handler_szybciej) == SIG_ERR) {
+        perror("[KUCHARZ] signal(SIGUSR1)");
+        exit(EXIT_FAILURE);
+    }
+    if (signal(SIGUSR2, handler_wolniej) == SIG_ERR) {
+        perror("[KUCHARZ] signal(SIGUSR2)");
+        exit(EXIT_FAILURE);
+    }
 
+    /* Generowanie klucza IPC */
     key_t key = ftok("ipc_keyfile", 'C');
-    if (key == -1) exit(1);
+    if (key == -1) {
+        perror("[KUCHARZ] ftok");
+        exit(EXIT_FAILURE);
+    }
+
+    /* Połączenie z zasobami IPC */
     int shm = shmget(key, sizeof(struct restauracja), 0);
+    if (shm == -1) {
+        perror("[KUCHARZ] shmget");
+        exit(EXIT_FAILURE);
+    }
+
     int sem = semget(key, 1, 0);
-    if (shm == -1 || sem == -1) exit(1);
+    if (sem == -1) {
+        perror("[KUCHARZ] semget");
+        exit(EXIT_FAILURE);
+    }
+
+    /* Dołączenie do pamięci dzielonej */
     struct restauracja *r = shmat(shm, NULL, 0);
+    if (r == (void *)-1) {
+        perror("[KUCHARZ] shmat");
+        exit(EXIT_FAILURE);
+    }
+
+    printf("[KUCHARZ] Polaczono z zasobami IPC\n");
 
     // Rejestracja PID dla Kierownika
     lock(sem);
@@ -91,8 +143,16 @@ int main() {
                 polozony = 1;
             }
             unlock(sem);
-            if (!polozony) usleep(500000); // 0.5s czekania na miejsce na tasmie
+            if (!polozony) usleep(500000); /* 0.5s czekania na miejsce na taśmie */
         }
     }
+
+    printf("[KUCHARZ] Restauracja zamknieta. Konczenie pracy.\n");
+
+    /* Odłączenie od pamięci dzielonej */
+    if (shmdt(r) == -1) {
+        perror("[KUCHARZ] shmdt");
+    }
+
     return 0;
 }

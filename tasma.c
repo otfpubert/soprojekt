@@ -1,3 +1,11 @@
+/*
+ * tasma.c - Proces taśmy transportowej (conveyor belt)
+ *
+ * Odpowiada za:
+ * - Cykliczne przesuwanie talerzyków na taśmie co 1 sekundę
+ * - Ruch: segment[i] -> segment[(i+1) % SEGMENTY]
+ */
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <unistd.h>
@@ -9,27 +17,36 @@
 #include "wspolne.h"
 
 int main() {
+    printf("[TASMA] Start procesu tasmy\n");
+
+    /* Generowanie klucza IPC */
     key_t key = ftok("ipc_keyfile", 'C');
     if (key == -1) {
         perror("[TASMA] ftok");
-        exit(1);
+        exit(EXIT_FAILURE);
     }
 
+    /* Połączenie z zasobami IPC */
     int shm = shmget(key, sizeof(struct restauracja), 0);
+    if (shm == -1) {
+        perror("[TASMA] shmget");
+        exit(EXIT_FAILURE);
+    }
+
     int sem = semget(key, 1, 0);
-
-    if (shm == -1 || sem == -1) {
-        perror("[TASMA] ipc");
-        exit(1);
+    if (sem == -1) {
+        perror("[TASMA] semget");
+        exit(EXIT_FAILURE);
     }
 
+    /* Dołączenie do pamięci dzielonej */
     struct restauracja *r = shmat(shm, NULL, 0);
-    if (r == (void*)-1) {
+    if (r == (void *)-1) {
         perror("[TASMA] shmat");
-        exit(1);
+        exit(EXIT_FAILURE);
     }
 
-    printf("[TASMA] start procesu tasmy\n");
+    printf("[TASMA] Polaczono z zasobami IPC (shm=%d, sem=%d)\n", shm, sem);
 
     while (r->otwarta) {
         sleep(1);
@@ -51,6 +68,12 @@ int main() {
         unlock(sem);
     }
 
-    shmdt(r);
+    printf("[TASMA] Restauracja zamknieta. Konczenie pracy.\n");
+
+    /* Odłączenie od pamięci dzielonej */
+    if (shmdt(r) == -1) {
+        perror("[TASMA] shmdt");
+    }
+
     return 0;
 }
