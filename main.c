@@ -22,18 +22,13 @@
 
 #include "wspolne.h"
 
-#define LICZBA_GRUP 40
+#define LICZBA_GRUP 100
 
 /* Globalne ID zasobów IPC do sprzątania przy wyjściu */
 int g_shm_id = -1;
 int g_sem_id = -1;
 int g_msg_id = -1;
 
-/*
- * Handler sygnału SIGINT (CTRL+C).
- * Wysyła SIGTERM do wszystkich procesów potomnych,
- * usuwa zasoby IPC i kończy program.
- */
 void sprzatanie(int sig) {
     printf("\n[MAIN] Otrzymano sygnal %d. Sprzatanie zasobow IPC...\n", sig);
 
@@ -85,8 +80,7 @@ int main() {
         exit(EXIT_FAILURE);
     }
 
-    /* Generowanie klucza IPC z pliku ipc_keyfile */
-    key_t key = ftok("ipc_keyfile", 'K');
+    key_t key = ftok("ipc_keyfile", 'C');
     if (key == -1) {
         perror("[MAIN] ftok - upewnij sie ze plik ipc_keyfile istnieje");
         exit(EXIT_FAILURE);
@@ -242,6 +236,35 @@ int main() {
             }
         }
 
+        /* Walidacja: max 3 dzieci na 1 dorosłego (wymaganie z regulaminu) */
+        int liczba_dzieci = 0;
+        int liczba_doroslych = 0;
+        for (int k = 0; k < rozmiar; k++) {
+            if (member_child[k]) liczba_dzieci++;
+            else liczba_doroslych++;
+        }
+
+        /* Korekta jeśli za dużo dzieci */
+        if (liczba_doroslych > 0 && liczba_dzieci > 3 * liczba_doroslych) {
+            int max_dzieci = 3 * liczba_doroslych;
+            printf("[MAIN] Grupa %d: za duzo dzieci (%d), koryguje do %d\n",
+                   g, liczba_dzieci, max_dzieci);
+
+            /* Zamieniamy nadmiarowe dzieci na dorosłych */
+            for (int k = rozmiar - 1; k > 0 && liczba_dzieci > max_dzieci; k--) {
+                if (member_child[k]) {
+                    member_child[k] = 0;
+                    liczba_dzieci--;
+                }
+            }
+        }
+
+        /* Specjalny przypadek: grupa samych dzieci - niedozwolone */
+        if (liczba_doroslych == 0) {
+            printf("[MAIN] Grupa %d: brak doroslych, pierwszy czlonek staje sie doroslym\n", g);
+            member_child[0] = 0;  /* Pierwszy zawsze dorosły */
+        }
+
         /* Tworzenie procesów klientów w grupie */
         for (int i = 0; i < rozmiar; i++) {
             pid_t pid_klient = fork();
@@ -269,7 +292,7 @@ int main() {
         }
 
         /* Przerwa między grupami */
-        usleep(500000); /* 0.5 sekundy zamiast 1s - szybsza symulacja */
+        //usleep(500000); /* 0.5 sekundy zamiast 1s - szybsza symulacja */
     }
 
     printf("[MAIN] Koniec przyjmowania nowych klientow.\n");
@@ -289,7 +312,7 @@ int main() {
             break;
         }
         printf("[MAIN] Pozostalo %d aktywnych klientow. Czekam...\n", aktywni);
-        sleep(2);
+        //sleep(2);
     }
 
     /* Zamknięcie restauracji - to zatrzyma pętle w innych procesach */
@@ -299,7 +322,7 @@ int main() {
     unlock(g_sem_id);
 
     /* Dajemy czas procesom na zakończenie i wygenerowanie raportów */
-    sleep(2);
+    //sleep(2);
 
     printf("[MAIN] Oczekiwanie na zakonczenie procesow potomnych...\n");
 

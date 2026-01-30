@@ -43,7 +43,7 @@ int main() {
     printf("[KIEROWNIK] Start panelu kierownika\n");
 
     /* Generowanie klucza IPC */
-    key_t key = ftok("ipc_keyfile", 'K');
+    key_t key = ftok("ipc_keyfile", 'C');
     if (key == -1) {
         perror("[KIEROWNIK] ftok - upewnij sie ze main jest uruchomiony");
         exit(EXIT_FAILURE);
