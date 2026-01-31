@@ -240,7 +240,7 @@ int main(int argc, char *argv[]) {
                 break; 
             }
             unlock(sem);
-            usleep(100000); 
+            usleep(100000); /* Czekanie na przydzielenie miejsca */
         }
     }
     
@@ -304,7 +304,7 @@ int main(int argc, char *argv[]) {
             }
         }
         unlock(sem);
-        sleep(1); 
+        usleep(500000); /* 0.5s między próbami jedzenia */
     }
 
     lock(sem);
@@ -316,7 +316,7 @@ int main(int argc, char *argv[]) {
         lock(sem);
         if (r->grupa_zjedzone_cnt[moj_gid] >= moja_grupa_size) moge_wyjsc = 1;
         unlock(sem);
-        if (!moge_wyjsc) sleep(1);
+        if (!moge_wyjsc) { /* czekaj */ }
     }
 
     /* === PŁATNOŚĆ - tylko lider płaci za całą grupę === */
@@ -364,6 +364,16 @@ int main(int argc, char *argv[]) {
     }
 
     lock(sem);
+
+    /* Anulowanie nieodebranego zamówienia specjalnego (jeśli było) */
+    for (int i = 0; i < MAX_ZAMOWIEN; i++) {
+        if (r->zamowienia[i].aktywne && r->zamowienia[i].pid_klienta == getpid()) {
+            r->zamowienia[i].aktywne = 0;
+            zrzut_do_logu("KLIENT %d: Anulowalem nieodebrane zamowienie specjalne", getpid());
+            break;
+        }
+    }
+
     if (typ_miejsca == 0) {
         r->lada[idx_miejsca].zajete = 0;
         zrzut_do_logu("KLIENT PID=%d (G=%d): Zwolnilem LADE nr %d", getpid(), moj_gid, idx_miejsca);
@@ -374,7 +384,8 @@ int main(int argc, char *argv[]) {
         r->stoliki[idx_miejsca].ile_osob--;
         if (r->stoliki[idx_miejsca].ile_osob == 0) {
             r->stoliki[idx_miejsca].id_grupy = -1;
-            r->gdzie_siedzimy[moj_gid] = -1; 
+            r->stoliki[idx_miejsca].rozmiar_grupy = 0;  /* Reset rozmiaru grupy */
+            r->gdzie_siedzimy[moj_gid] = -1;
             zrzut_do_logu("KLIENT PID=%d (G=%d): Zwolnilem STOLIK nr %d (Typ: 1)", getpid(), moj_gid, idx_miejsca);
         }
     }

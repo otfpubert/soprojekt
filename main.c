@@ -22,13 +22,18 @@
 
 #include "wspolne.h"
 
-#define LICZBA_GRUP 100
+#define LICZBA_GRUP 30  /* Liczba grup do symulacji */
 
 /* Globalne ID zasobów IPC do sprzątania przy wyjściu */
 int g_shm_id = -1;
 int g_sem_id = -1;
 int g_msg_id = -1;
 
+/*
+ * Handler sygnału SIGINT (CTRL+C).
+ * Wysyła SIGTERM do wszystkich procesów potomnych,
+ * usuwa zasoby IPC i kończy program.
+ */
 void sprzatanie(int sig) {
     printf("\n[MAIN] Otrzymano sygnal %d. Sprzatanie zasobow IPC...\n", sig);
 
@@ -80,6 +85,7 @@ int main() {
         exit(EXIT_FAILURE);
     }
 
+    /* Generowanie klucza IPC z pliku ipc_keyfile */
     key_t key = ftok("ipc_keyfile", 'C');
     if (key == -1) {
         perror("[MAIN] ftok - upewnij sie ze plik ipc_keyfile istnieje");
@@ -150,11 +156,30 @@ int main() {
         r->stoliki[i].ile_osob = 0;
         r->stoliki[i].segment = 10 + i;
         r->stoliki[i].id_grupy = -1;
+        r->stoliki[i].rozmiar_grupy = 0;  /* Brak grupy na starcie */
         if (i < 3) r->stoliki[i].pojemnosc = 2;
         else if (i < 6) r->stoliki[i].pojemnosc = 3;
         else r->stoliki[i].pojemnosc = 4;
     }
     for (int i = 0; i < MAX_KLIENTOW; i++) r->klienci[i].aktywny = 0;
+
+    /* Inicjalizacja liczników produkcji i sprzedaży */
+    for (int i = 0; i < KOLORY; i++) {
+        r->wyprodukowane[i] = 0;
+        r->sprzedane[i] = 0;
+    }
+
+    /* Inicjalizacja statystyk kasy */
+    r->kasa.transakcje = 0;
+    r->kasa.suma_dzienna = 0;
+
+    /* Inicjalizacja liczników grup */
+    for (int i = 0; i < MAX_GRUP; i++) {
+        r->grupa_zaplacila[i] = 0;
+        for (int j = 0; j < KOLORY; j++) {
+            r->grupa_talerzyki[i][j] = 0;
+        }
+    }
 
     printf("[MAIN] Uruchamianie procesow potomnych...\n");
 
@@ -292,7 +317,7 @@ int main() {
         }
 
         /* Przerwa między grupami */
-        //usleep(500000); /* 0.5 sekundy zamiast 1s - szybsza symulacja */
+        usleep(1500000); /* 1.5 sekundy między grupami */
     }
 
     printf("[MAIN] Koniec przyjmowania nowych klientow.\n");
@@ -312,7 +337,7 @@ int main() {
             break;
         }
         printf("[MAIN] Pozostalo %d aktywnych klientow. Czekam...\n", aktywni);
-        //sleep(2);
+        sleep(2);
     }
 
     /* Zamknięcie restauracji - to zatrzyma pętle w innych procesach */
@@ -322,7 +347,7 @@ int main() {
     unlock(g_sem_id);
 
     /* Dajemy czas procesom na zakończenie i wygenerowanie raportów */
-    //sleep(2);
+    sleep(2);
 
     printf("[MAIN] Oczekiwanie na zakonczenie procesow potomnych...\n");
 

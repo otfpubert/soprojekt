@@ -31,25 +31,14 @@ static inline void check_error(int ret, const char *msg) {
     }
 }
 
-/*
- * Wersja check_error która nie kończy programu, tylko loguje błąd.
- * Przydatna gdy chcemy kontynuować mimo błędu.
- */
-static inline int check_error_warn(int ret, const char *msg) {
-    if (ret == -1) {
-        perror(msg);
-        return -1;
-    }
-    return ret;
-}
 /* === STAŁE KONFIGURACYJNE === */
 #define SEGMENTY 20
 #define KOLORY 6
 #define LADA_MIEJSC 9
 #define STOLIKI 10
-#define MAX_KLIENTOW 200
+#define MAX_KLIENTOW 1000
 #define MAX_GRUP     100
-#define MAX_ZAMOWIEN 50
+#define MAX_ZAMOWIEN 100
 
 /* Limity talerzyków na osobę (wymaganie: 3-10) */
 #define MIN_TALERZYKI 3
@@ -62,7 +51,7 @@ static inline int check_error_warn(int ret, const char *msg) {
 
 /* Godziny otwarcia (w sekundach symulacji od startu) */
 #define CZAS_OTWARCIA  0      /* Tp - start */
-#define CZAS_ZAMKNIECIA 120   /* Tk - 120s = 2 minuty symulacji */
+#define CZAS_ZAMKNIECIA 60    /* Tk - 60s symulacji */
 
 /* === STRUKTURY KOMUNIKATÓW === */
 
@@ -107,7 +96,6 @@ static const int ceny[KOLORY] = {10, 15, 20, 40, 50, 60};
 struct talerzyk {
     int kolor;
     int cena;
-    int ilosc_ryb;
     int id_odbiorcy;
 };
 
@@ -147,6 +135,7 @@ struct stolik {
     int pojemnosc;
     int segment;
     int id_grupy;
+    int rozmiar_grupy;  /* Rozmiar pierwszej grupy (do dosiadania równolicznego) */
 };
 
 struct zamowienie {
@@ -161,7 +150,6 @@ struct zamowienie {
 struct kasa_stats {
     int transakcje;              /* Liczba obsłużonych grup */
     int suma_dzienna;            /* Całkowity utarg w zł */
-    int sprzedane_talerzyki[KOLORY]; /* Sprzedane talerzyki per kolor */
 };
 
 /*
@@ -170,7 +158,7 @@ struct kasa_stats {
 struct restauracja {
     int otwarta;
     pid_t pid_kucharza;          /* PID kucharza (dla kierownika) */
-    pid_t pid_kasy;              /* PID procesu kasy */
+    pid_t pid_tasmy;             /* PID taśmy (dla kierownika) */
 
     /* Czas symulacji */
     time_t czas_startu;          /* Timestamp startu restauracji */

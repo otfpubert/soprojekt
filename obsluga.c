@@ -21,17 +21,26 @@
 
 #include "wspolne.h"
 
-/* Zmienne globalne dla podsumowania */
-struct restauracja *r_global = NULL;
-volatile int generuj_raport = 0;
+/* Kolory ANSI dla terminala */
+#define ANSI_RESET   "\033[0m"
+#define ANSI_BLUE    "\033[34m"
+#define ANSI_RED     "\033[31m"
+#define ANSI_GREEN   "\033[32m"
+#define ANSI_BROWN   "\033[38;5;130m" /* prawdziwy brązowy (256 kolorów) */
+#define ANSI_SILVER  "\033[37m"       /* jasny szary */
+#define ANSI_GOLD    "\033[33;1m"     /* jasny żółty = złoty */
+#define ANSI_CYAN    "\033[36m"
 
-/*
- * Handler SIGTERM - ustawia flagę do generowania raportu.
- */
-void handler_zamkniecie(int sig) {
-    (void)sig;
-    generuj_raport = 1;
-}
+/* Tablica kolorów ANSI dla talerzyków (indeksowana jak KOLORY) */
+static const char *kolory_ansi[KOLORY] = {
+    ANSI_BLUE,   /* niebieski */
+    ANSI_RED,    /* czerwony */
+    ANSI_GREEN,  /* zielony */
+    ANSI_BROWN,  /* BRAZOWY */
+    ANSI_SILVER, /* SREBRNY */
+    ANSI_GOLD    /* ZLOTY */
+};
+
 
 /*
  * Oblicza sumę rachunku na podstawie talerzyków.
@@ -59,38 +68,27 @@ void generuj_podsumowanie(struct restauracja *r) {
     fprintf(f, "========================================\n\n");
 
     /* Sekcja KASA */
-    fprintf(f, "--- KASA (sprzedaz) ---\n");
+    fprintf(f, "--- KASA (transakcje) ---\n");
     fprintf(f, "Liczba transakcji: %d\n", r->kasa.transakcje);
     fprintf(f, "Utarg dzienny: %d zl\n\n", r->kasa.suma_dzienna);
 
-    fprintf(f, "Sprzedane talerzyki:\n");
+    /* Sekcja SPRZEDAZ (faktycznie zjedzone talerzyki) */
+    fprintf(f, "--- SPRZEDAZ (zjedzone talerzyki) ---\n");
     fprintf(f, "+---------------+------+--------+\n");
     fprintf(f, "| Kolor         | Szt. | Kwota  |\n");
     fprintf(f, "+---------------+------+--------+\n");
     int suma_szt = 0;
+    int suma_kwota = 0;
     for (int i = 0; i < KOLORY; i++) {
-        int kwota = r->kasa.sprzedane_talerzyki[i] * ceny[i];
+        int kwota = r->sprzedane[i] * ceny[i];
         fprintf(f, "| %-13s | %4d | %6d |\n",
-                nazwy_kolorow[i], r->kasa.sprzedane_talerzyki[i], kwota);
-        suma_szt += r->kasa.sprzedane_talerzyki[i];
+                nazwy_kolorow[i], r->sprzedane[i], kwota);
+        suma_szt += r->sprzedane[i];
+        suma_kwota += kwota;
     }
     fprintf(f, "+---------------+------+--------+\n");
-    fprintf(f, "| RAZEM         | %4d | %6d |\n", suma_szt, r->kasa.suma_dzienna);
+    fprintf(f, "| RAZEM         | %4d | %6d |\n", suma_szt, suma_kwota);
     fprintf(f, "+---------------+------+--------+\n\n");
-
-    /* Sekcja KUCHARZ */
-    fprintf(f, "--- KUCHARZ (produkcja) ---\n");
-    fprintf(f, "+---------------+------+\n");
-    fprintf(f, "| Kolor         | Szt. |\n");
-    fprintf(f, "+---------------+------+\n");
-    int suma_prod = 0;
-    for (int i = 0; i < KOLORY; i++) {
-        fprintf(f, "| %-13s | %4d |\n", nazwy_kolorow[i], r->wyprodukowane[i]);
-        suma_prod += r->wyprodukowane[i];
-    }
-    fprintf(f, "+---------------+------+\n");
-    fprintf(f, "| RAZEM         | %4d |\n", suma_prod);
-    fprintf(f, "+---------------+------+\n\n");
 
     /* Sekcja POZOSTALE NA TASMIE */
     fprintf(f, "--- POZOSTALE NA TASMIE ---\n");
@@ -114,14 +112,29 @@ void generuj_podsumowanie(struct restauracja *r) {
     fprintf(f, "| RAZEM         | %4d |\n", suma_pozostale);
     fprintf(f, "+---------------+------+\n\n");
 
+    /* Walidacja spójności danych */
+    fprintf(f, "--- WALIDACJA ---\n");
+    int suma_prod = 0;
+    for (int i = 0; i < KOLORY; i++) suma_prod += r->wyprodukowane[i];
+    int oczekiwane = suma_szt + suma_pozostale;
+    if (suma_prod == oczekiwane) {
+        fprintf(f, "OK: Wyprodukowano %d = Sprzedano %d + Pozostalo %d\n\n",
+                suma_prod, suma_szt, suma_pozostale);
+    } else {
+        fprintf(f, "UWAGA: Wyprodukowano %d != Sprzedano %d + Pozostalo %d (=%d)\n",
+                suma_prod, suma_szt, suma_pozostale, oczekiwane);
+        fprintf(f, "Roznica: %d (moga byc talerzyki w tranzycie)\n\n",
+                suma_prod - oczekiwane);
+    }
+
     fprintf(f, "========================================\n");
-    fprintf(f, "        KONIEC RAPORTU\n");
+    fprintf(f, "     KONIEC RAPORTU OBSLUGI\n");
     fprintf(f, "========================================\n");
 
     fclose(f);
     printf("[OBSLUGA] Raport dzienny zapisany do raport_dzienny.txt\n");
-    zrzut_do_logu("OBSLUGA: Raport - %d transakcji, %d zl utargu, %d wyprodukowano, %d pozostalo",
-                  r->kasa.transakcje, r->kasa.suma_dzienna, suma_prod, suma_pozostale);
+    zrzut_do_logu("OBSLUGA: Raport - %d transakcji, %d zl utargu, sprzedano %d, pozostalo %d",
+                  r->kasa.transakcje, r->kasa.suma_dzienna, suma_szt, suma_pozostale);
 }
 
 /* --- STRUKTURA LOKALNEJ KOLEJKI --- */
@@ -207,12 +220,6 @@ void zapros_klienta(int msg_id, wpis_kolejki *kolejka, int *cnt, int idx_w_kolej
 int main() {
     printf("[OBSLUGA] Start managera sali + kasy\n");
 
-    /* Rejestracja handlera zamknięcia */
-    if (signal(SIGTERM, handler_zamkniecie) == SIG_ERR) {
-        perror("[OBSLUGA] signal(SIGTERM)");
-        exit(EXIT_FAILURE);
-    }
-
     /* Generowanie klucza IPC */
     key_t key = ftok("ipc_keyfile", 'C');
     if (key == -1) {
@@ -248,16 +255,10 @@ int main() {
 
     printf("[OBSLUGA] Polaczono z zasobami IPC (shm=%d, sem=%d, msg=%d)\n", shm, sem, msg);
 
-    /* Ustawienie zmiennej globalnej dla handlera */
-    r_global = r;
-
     /* Inicjalizacja statystyk kasy */
     lock(sem);
     r->kasa.transakcje = 0;
     r->kasa.suma_dzienna = 0;
-    for (int i = 0; i < KOLORY; i++) {
-        r->kasa.sprzedane_talerzyki[i] = 0;
-    }
     for (int i = 0; i < MAX_GRUP; i++) {
         r->grupa_zaplacila[i] = 0;
         for (int j = 0; j < KOLORY; j++) {
@@ -303,9 +304,6 @@ int main() {
             lock(sem);
             r->kasa.transakcje++;
             r->kasa.suma_dzienna += suma;
-            for (int i = 0; i < KOLORY; i++) {
-                r->kasa.sprzedane_talerzyki[i] += kasa_req.talerzyki[i];
-            }
             r->grupa_zaplacila[id_grupy] = 1;
             sprintf(r->info, "KASA: Grupa %d zaplacila %d zl", id_grupy, suma);
             unlock(sem);
@@ -333,25 +331,31 @@ int main() {
         // 2. LOGIKA TETRIS 
         // G4
         if (q4_cnt > 0) {
-            for (int i=6; i<10; i++) { 
+            for (int i=6; i<10; i++) {
                 if (r->stoliki[i].ile_osob == 0) {
-                    r->stoliki[i].ile_osob = 4; zapros_klienta(msg, queue_g4, &q4_cnt, 0, i, 1);
+                    r->stoliki[i].ile_osob = 4;
+                    r->stoliki[i].rozmiar_grupy = 4;  /* Zapamiętaj rozmiar grupy */
+                    zapros_klienta(msg, queue_g4, &q4_cnt, 0, i, 1);
                     if(q4_cnt == 0) break;
                 }
             }
         }
         // G3
         if (q3_cnt > 0) {
-            for (int i=3; i<6; i++) { 
+            for (int i=3; i<6; i++) {
                 if (r->stoliki[i].ile_osob == 0) {
-                    r->stoliki[i].ile_osob = 3; zapros_klienta(msg, queue_g3, &q3_cnt, 0, i, 1);
+                    r->stoliki[i].ile_osob = 3;
+                    r->stoliki[i].rozmiar_grupy = 3;
+                    zapros_klienta(msg, queue_g3, &q3_cnt, 0, i, 1);
                     if(q3_cnt == 0) break;
                 }
             }
-            if (q3_cnt > 0 && q4_cnt == 0) { 
+            if (q3_cnt > 0 && q4_cnt == 0) {
                 for (int i=6; i<10; i++) {
                      if (r->stoliki[i].ile_osob == 0) {
-                        r->stoliki[i].ile_osob = 3; zapros_klienta(msg, queue_g3, &q3_cnt, 0, i, 1);
+                        r->stoliki[i].ile_osob = 3;
+                        r->stoliki[i].rozmiar_grupy = 3;
+                        zapros_klienta(msg, queue_g3, &q3_cnt, 0, i, 1);
                         if(q3_cnt == 0) break;
                     }
                 }
@@ -359,30 +363,49 @@ int main() {
         }
         // G2
         if (q2_cnt > 0) {
-            for (int i = 0; i < LADA_MIEJSC - 1; i++) { 
-                if (r->lada[i].zajete == 0 && r->lada[i+1].zajete == 0) {
-                    r->lada[i].zajete=1; r->lada[i+1].zajete=1;
-                    zapros_klienta(msg, queue_g2, &q2_cnt, 0, i, 0); 
-                    if(q2_cnt == 0) break;
+            /* VIP G2 nie siada przy ladzie - sprawdź czy pierwszy w kolejce ma priorytet */
+            int g2_vip = (q2_cnt > 0 && queue_g2[0].group_priority);
+
+            /* Lada tylko dla nie-VIP */
+            if (!g2_vip) {
+                for (int i = 0; i < LADA_MIEJSC - 1; i++) {
+                    if (r->lada[i].zajete == 0 && r->lada[i+1].zajete == 0) {
+                        r->lada[i].zajete=1; r->lada[i+1].zajete=1;
+                        zapros_klienta(msg, queue_g2, &q2_cnt, 0, i, 0);
+                        if(q2_cnt == 0) break;
+                    }
                 }
             }
-            if (q2_cnt > 0) { 
-                for (int i=0; i<3; i++) { 
-                    if (r->stoliki[i].ile_osob==0) { r->stoliki[i].ile_osob=2; zapros_klienta(msg, queue_g2, &q2_cnt, 0, i, 1); if(q2_cnt==0) break;}
+            if (q2_cnt > 0) {
+                for (int i=0; i<3; i++) {
+                    if (r->stoliki[i].ile_osob==0) {
+                        r->stoliki[i].ile_osob=2;
+                        r->stoliki[i].rozmiar_grupy = 2;
+                        zapros_klienta(msg, queue_g2, &q2_cnt, 0, i, 1);
+                        if(q2_cnt==0) break;
+                    }
                 }
             }
-            if (q2_cnt > 0 && q3_cnt == 0) { 
+            if (q2_cnt > 0 && q3_cnt == 0) {
                 for (int i=3; i<6; i++) {
-                    if (r->stoliki[i].ile_osob==0) { r->stoliki[i].ile_osob=2; zapros_klienta(msg, queue_g2, &q2_cnt, 0, i, 1); if(q2_cnt==0) break;}
+                    if (r->stoliki[i].ile_osob==0) {
+                        r->stoliki[i].ile_osob=2;
+                        r->stoliki[i].rozmiar_grupy = 2;
+                        zapros_klienta(msg, queue_g2, &q2_cnt, 0, i, 1);
+                        if(q2_cnt==0) break;
+                    }
                 }
             }
-            if (q2_cnt > 0) { 
+            if (q2_cnt > 0) {
                 for (int i=6; i<10; i++) {
                     int wolne = r->stoliki[i].pojemnosc - r->stoliki[i].ile_osob;
-                    int dosiadka = (r->stoliki[i].ile_osob > 0);
+                    /* DOSIADANIE RÓWNOLICZNE: tylko G2 do G2 */
+                    int dosiadka_ok = (r->stoliki[i].ile_osob > 0 && r->stoliki[i].rozmiar_grupy == 2);
                     int pusty_ok = (r->stoliki[i].ile_osob == 0 && q4_cnt==0 && q3_cnt==0);
-                    if (wolne >= 2 && (dosiadka || pusty_ok)) {
-                        r->stoliki[i].ile_osob += 2; zapros_klienta(msg, queue_g2, &q2_cnt, 0, i, 1);
+                    if (wolne >= 2 && (dosiadka_ok || pusty_ok)) {
+                        if (pusty_ok) r->stoliki[i].rozmiar_grupy = 2;
+                        r->stoliki[i].ile_osob += 2;
+                        zapros_klienta(msg, queue_g2, &q2_cnt, 0, i, 1);
                         if(q2_cnt == 0) break;
                     }
                 }
@@ -390,10 +413,16 @@ int main() {
         }
         // G1
         if (q1_cnt > 0) {
-            for (int i=0; i<LADA_MIEJSC; i++) {
-                if (r->lada[i].zajete == 0) {
-                    r->lada[i].zajete = 1; zapros_klienta(msg, queue_g1, &q1_cnt, 0, i, 0); 
-                    if(q1_cnt == 0) break;
+            /* VIP G1 nie siada przy ladzie - sprawdź czy pierwszy w kolejce ma priorytet */
+            int g1_vip = (q1_cnt > 0 && queue_g1[0].group_priority);
+
+            /* Lada tylko dla nie-VIP */
+            if (!g1_vip) {
+                for (int i=0; i<LADA_MIEJSC; i++) {
+                    if (r->lada[i].zajete == 0) {
+                        r->lada[i].zajete = 1; zapros_klienta(msg, queue_g1, &q1_cnt, 0, i, 0);
+                        if(q1_cnt == 0) break;
+                    }
                 }
             }
             if (q1_cnt > 0) {
@@ -401,9 +430,12 @@ int main() {
                     if (r->stoliki[i].ile_osob < r->stoliki[i].pojemnosc) {
                         int pusty = (r->stoliki[i].ile_osob == 0);
                         int blokada = 0;
-                        if (pusty && (q4_cnt>0 || q3_cnt>0 || q2_cnt>0)) blokada = 1; 
-                        
-                        if (!blokada) {
+                        if (pusty && (q4_cnt>0 || q3_cnt>0 || q2_cnt>0)) blokada = 1;
+                        /* DOSIADANIE RÓWNOLICZNE: tylko G1 do G1 */
+                        int dosiadka_ok = (!pusty && r->stoliki[i].rozmiar_grupy == 1);
+
+                        if (!blokada && (pusty || dosiadka_ok)) {
+                            if (pusty) r->stoliki[i].rozmiar_grupy = 1;
                             r->stoliki[i].ile_osob += 1; zapros_klienta(msg, queue_g1, &q1_cnt, 0, i, 1);
                             if(q1_cnt == 0) break;
                         }
@@ -415,7 +447,7 @@ int main() {
         unlock(sem);
 
         // 3. WYSWIETLANIE
-        system("clear");
+        printf("\033[H\033[J"); /* ANSI: kursor home + clear (szybsze niż system("clear")) */
         printf("\n=== MONITOR SALI I KOLEJEK ===\n");
         printf("Kolejki: G4:[%d:%d] G3:[%d:%d] G2:[%d:%d] G1:[%d:%d]\n", 
                q4_cnt, queue_g4[0].group_priority, 
@@ -439,26 +471,33 @@ int main() {
             }
             printf("%-18s | ", bufor_miejsca);
 
-            char bufor_jedzenia[40];
+            /* Wyświetlanie talerzyków z kolorami */
             if (r->tasma.seg[seg].zajety) {
                 struct talerzyk t = r->tasma.seg[seg].t;
-                if(t.id_odbiorcy != -1) sprintf(bufor_jedzenia, "%s($%d)->%d", nazwy_kolorow[t.kolor], t.cena, t.id_odbiorcy);
-                else sprintf(bufor_jedzenia, "%s ($%d)", nazwy_kolorow[t.kolor], t.cena);
-            } else sprintf(bufor_jedzenia, "---");
-            printf("%-20s | ", bufor_jedzenia);
+                const char *kolor = kolory_ansi[t.kolor];
+                if(t.id_odbiorcy != -1)
+                    printf("%s%-10s%s($%d)->%-5d | ", kolor, nazwy_kolorow[t.kolor], ANSI_RESET, t.cena, t.id_odbiorcy);
+                else
+                    printf("%s%-10s%s ($%d)       | ", kolor, nazwy_kolorow[t.kolor], ANSI_RESET, t.cena);
+            } else {
+                printf("---                  | ");
+            }
 
+            /* Wyświetlanie klientów z kolorami VIP */
             int found = 0;
-            if (seg > 0) { 
+            if (seg > 0) {
                 for (int i = 0; i < MAX_KLIENTOW; i++) {
                     struct klient_info *k = &r->klienci[i];
                     if (!k->aktywny || k->segment != seg) continue;
                     if (found) printf(", ");
-                    
-                    char status[15] = "";
-                    if (k->is_vip) strcat(status, "VIP ");
-                    if (k->is_child) strcat(status, "JUNIOR ");
-                    
-                    printf("PID=%d %sG=%d (%d/%d)", k->pid, status, k->id_grupy, k->zjedzone, k->limit);
+
+                    if (k->is_vip) {
+                        printf("%sVIP%s PID=%d G=%d (%d/%d)", ANSI_GOLD, ANSI_RESET, k->pid, k->id_grupy, k->zjedzone, k->limit);
+                    } else if (k->is_child) {
+                        printf("%sJUNIOR%s PID=%d G=%d (%d/%d)", ANSI_CYAN, ANSI_RESET, k->pid, k->id_grupy, k->zjedzone, k->limit);
+                    } else {
+                        printf("PID=%d G=%d (%d/%d)", k->pid, k->id_grupy, k->zjedzone, k->limit);
+                    }
                     found = 1;
                 }
             }
@@ -467,8 +506,9 @@ int main() {
         printf("---------------------------------------------------------------------------------\n");
         printf("[KASA] Transakcje: %d | Utarg: %d zl\n", r->kasa.transakcje, r->kasa.suma_dzienna);
         printf("[INFO]: %s\n", r->info);
+        fflush(stdout);
 
-        sleep(1);
+        sleep(1); /* Odświeżanie co 1s */
     }
 
     printf("[OBSLUGA] Restauracja zamknieta. Generowanie raportu...\n");

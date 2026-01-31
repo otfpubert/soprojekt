@@ -32,7 +32,7 @@ volatile int delay = 1000000;
  * przyśpiesza dwukrotnie wydawanie dań z kuchni."
  */
 void handler_szybciej(int sig) {
-    (void)sig;
+    (void)sig; /* Suppress unused parameter warning */
     delay = 500000; /* 0.5s (2x szybciej) */
 }
 
@@ -96,9 +96,6 @@ int main() {
     unlock(sem);
 
     while (r->otwarta) {
-        // Uzywamy usleep zamiast sleep dla precyzji
-        usleep(delay);
-
         int k = -1;
         int dla_kogo = -1;
         int idx_zamowienia = -1;
@@ -124,22 +121,31 @@ int main() {
         struct talerzyk nowy;
         nowy.kolor = k;
         nowy.cena = ceny[k];
-        nowy.ilosc_ryb = (rand() % 2) + 1;
         nowy.id_odbiorcy = dla_kogo;
 
         int polozony = 0;
         while (r->otwarta && !polozony) {
             lock(sem);
             if (!r->tasma.seg[0].zajety) {
+                /* Sprawdź czy zamówienie specjalne jest jeszcze aktywne */
+                if (idx_zamowienia != -1) {
+                    if (!r->zamowienia[idx_zamowienia].aktywne) {
+                        /* Klient anulował - zmień na zwykły talerzyk */
+                        nowy.id_odbiorcy = -1;
+                        idx_zamowienia = -1;
+                        sprintf(r->info, "KUCHARZ: Zamowienie anulowane, %s -> zwykly", nazwy_kolorow[k]);
+                    }
+                }
+
                 r->tasma.seg[0].zajety = 1;
                 r->tasma.seg[0].t = nowy;
                 r->wyprodukowane[k]++;
-                
+
                 if (idx_zamowienia != -1) {
                     r->zamowienia[idx_zamowienia].aktywne = 0;
                     sprintf(r->info, "KUCHARZ: Wydano %s dla %d!", nazwy_kolorow[k], dla_kogo);
                 }
-                
+
                 polozony = 1;
             }
             unlock(sem);
@@ -147,7 +153,43 @@ int main() {
         }
     }
 
-    printf("[KUCHARZ] Restauracja zamknieta. Konczenie pracy.\n");
+    printf("[KUCHARZ] Restauracja zamknieta. Generowanie raportu produkcji...\n");
+
+    /* === RAPORT KUCHARZA - podsumowanie produkcji === */
+    lock(sem);
+    FILE *f = fopen("raport_kucharz.txt", "w");
+    if (f) {
+        fprintf(f, "========================================\n");
+        fprintf(f, "   RAPORT KUCHARZA - PRODUKCJA\n");
+        fprintf(f, "========================================\n\n");
+
+        fprintf(f, "+---------------+------+--------+\n");
+        fprintf(f, "| Kolor         | Szt. | Kwota  |\n");
+        fprintf(f, "+---------------+------+--------+\n");
+
+        int razem_szt = 0;
+        int razem_kwota = 0;
+        for (int i = 0; i < KOLORY; i++) {
+            int szt = r->wyprodukowane[i];
+            int kwota = szt * ceny[i];
+            razem_szt += szt;
+            razem_kwota += kwota;
+            fprintf(f, "| %-13s | %4d | %6d |\n", nazwy_kolorow[i], szt, kwota);
+        }
+        fprintf(f, "+---------------+------+--------+\n");
+        fprintf(f, "| RAZEM         | %4d | %6d |\n", razem_szt, razem_kwota);
+        fprintf(f, "+---------------+------+--------+\n");
+
+        fprintf(f, "\n========================================\n");
+        fprintf(f, "      KONIEC RAPORTU KUCHARZA\n");
+        fprintf(f, "========================================\n");
+
+        fclose(f);
+        printf("[KUCHARZ] Raport zapisany do raport_kucharz.txt\n");
+    } else {
+        perror("[KUCHARZ] fopen raport_kucharz.txt");
+    }
+    unlock(sem);
 
     /* Odłączenie od pamięci dzielonej */
     if (shmdt(r) == -1) {

@@ -2,8 +2,9 @@
  * tasma.c - Proces taśmy transportowej (conveyor belt)
  *
  * Odpowiada za:
- * - Cykliczne przesuwanie talerzyków na taśmie co 1 sekundę
+ * - Cykliczne przesuwanie talerzyków na taśmie
  * - Ruch: segment[i] -> segment[(i+1) % SEGMENTY]
+ * - Reagowanie na sygnały kierownika (przyspieszenie/spowolnienie)
  */
 
 #include <stdio.h>
@@ -13,11 +14,38 @@
 #include <sys/shm.h>
 #include <sys/sem.h>
 #include <errno.h>
+#include <signal.h>
 
 #include "wspolne.h"
 
+/*
+ * Zmienna globalna kontrolująca prędkość taśmy (w mikrosekundach).
+ * Domyślnie 1 sekunda = 1000000 us
+ */
+volatile int delay = 1000000;
+
+/* Handler SIGUSR1 - przyspieszenie taśmy 2x */
+void handler_szybciej(int sig) {
+    (void)sig;
+    delay = 500000; /* 0.5s (2x szybciej) */
+}
+
+/* Handler SIGUSR2 - spowolnienie taśmy o 50% */
+void handler_wolniej(int sig) {
+    (void)sig;
+    delay = 2000000; /* 2.0s (50% wolniej) */
+}
+
 int main() {
-    printf("[TASMA] Start procesu tasmy\n");
+    printf("[TASMA] Start procesu tasmy (PID=%d)\n", getpid());
+
+    /* Rejestracja handlerów sygnałów */
+    if (signal(SIGUSR1, handler_szybciej) == SIG_ERR) {
+        perror("[TASMA] signal(SIGUSR1)");
+    }
+    if (signal(SIGUSR2, handler_wolniej) == SIG_ERR) {
+        perror("[TASMA] signal(SIGUSR2)");
+    }
 
     /* Generowanie klucza IPC */
     key_t key = ftok("ipc_keyfile", 'C');
@@ -48,8 +76,13 @@ int main() {
 
     printf("[TASMA] Polaczono z zasobami IPC (shm=%d, sem=%d)\n", shm, sem);
 
+    /* Zapisanie PID taśmy dla kierownika */
+    lock(sem);
+    r->pid_tasmy = getpid();
+    unlock(sem);
+
     while (r->otwarta) {
-        sleep(1);
+        usleep(delay); /* Sterowane sygnałami SIGUSR1/SIGUSR2 */
 
         lock(sem);
 
