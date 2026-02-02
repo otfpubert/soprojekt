@@ -18,6 +18,7 @@
 #include <errno.h>
 #include <time.h>
 #include <signal.h>
+#include <sys/time.h>
 
 #include "wspolne.h"
 
@@ -25,6 +26,17 @@
 struct restauracja *r_global = NULL;
 int moj_slot_idx_global = -1;
 int sem_global = -1;
+
+/* System głodu - klient je tylko gdy głód >= PROG_GLODU */
+#define PROG_GLODU 15
+volatile sig_atomic_t glod_tick_flag = 0;
+volatile int glod = PROG_GLODU;  /* Start z pełnym głodem - może jeść od razu */
+
+/* Handler SIGALRM - inkrementuje głód co tick */
+void handler_glod(int sig) {
+    (void)sig;
+    glod_tick_flag = 1;
+}
 
 /*
  * Handler sygnału SIGTERM - ewakuacja klienta.
@@ -37,6 +49,8 @@ void handler_ewakuacja(int sig) {
         lock(sem_global);
         r_global->klienci[moj_slot_idx_global].aktywny = 0;
         unlock(sem_global);
+        /* Zmniejsz licznik aktywnych klientów przy ewakuacji */
+        sem_dec(sem_global, SEM_ACTIVE);
     }
     zrzut_do_logu("KLIENT %d: EWAKUACJA! Uciekam!", getpid());
     exit(0);
@@ -49,6 +63,21 @@ int main(int argc, char *argv[]) {
     if (signal(SIGTERM, handler_ewakuacja) == SIG_ERR) {
         perror("[KLIENT] signal(SIGTERM)");
         exit(EXIT_FAILURE);
+    }
+
+    /* Rejestracja handlera głodu (SIGALRM) */
+    if (signal(SIGALRM, handler_glod) == SIG_ERR) {
+        perror("[KLIENT] signal(SIGALRM)");
+    }
+
+    /* Konfiguracja timera głodu (co 1 sekundę) */
+    struct itimerval timer;
+    timer.it_value.tv_sec = 1;
+    timer.it_value.tv_usec = 0;
+    timer.it_interval.tv_sec = 1;
+    timer.it_interval.tv_usec = 0;
+    if (setitimer(ITIMER_REAL, &timer, NULL) == -1) {
+        perror("[KLIENT] setitimer");
     }
 
     /* Parsowanie argumentów */
@@ -97,7 +126,7 @@ int main(int argc, char *argv[]) {
         exit(EXIT_FAILURE);
     }
 
-    int sem = semget(key, 1, 0);
+    int sem = semget(key, NUM_SEMS, 0);
     if (sem == -1) {
         perror("[KLIENT] semget");
         exit(EXIT_FAILURE);
@@ -119,6 +148,9 @@ int main(int argc, char *argv[]) {
     // Ustawienie zmiennych globalnych dla handlera
     r_global = r;
     sem_global = sem;
+
+    /* Zwiększ licznik aktywnych klientów */
+    sem_inc(sem, SEM_ACTIVE);
 
     int moj_slot_idx = -1;
     /* Losowy limit talerzyków: MIN_TALERZYKI do MAX_TALERZYKI (wymaganie: 3-10) */
@@ -175,9 +207,9 @@ int main(int argc, char *argv[]) {
         zapytanie.rozmiar_grupy = moja_grupa_size;
         zapytanie.group_priority = moja_grupa_ma_priorytet;
 
-        if (msgsnd(msg, &zapytanie, sizeof(struct komunikat) - sizeof(long), 0) == -1) {
+        while (msgsnd(msg, &zapytanie, sizeof(struct komunikat) - sizeof(long), 0) == -1) {
+            if (errno == EINTR) continue;  /* Przerwane przez SIGALRM - powtórz */
             if (errno == EIDRM) {
-                /* Kolejka usunięta - restauracja zamykana */
                 zrzut_do_logu("KLIENT %d: Restauracja zamknieta podczas rejestracji", getpid());
                 shmdt(r);
                 exit(0);
@@ -189,16 +221,21 @@ int main(int argc, char *argv[]) {
 
         /* Oczekiwanie na odpowiedź z przydziałem miejsca */
         struct komunikat odpowiedz;
-        if (msgrcv(msg, &odpowiedz, sizeof(struct komunikat) - sizeof(long), getpid(), 0) == -1) {
-            if (errno == EIDRM || errno == EINTR) {
-                /* Kolejka usunięta lub przerwane sygnałem */
-                zrzut_do_logu("KLIENT %d: Przerywam oczekiwanie na miejsce", getpid());
+        while (1) {
+            if (msgrcv(msg, &odpowiedz, sizeof(struct komunikat) - sizeof(long), getpid(), 0) == -1) {
+                if (errno == EINTR) {
+                    continue;  /* Przerwane przez SIGALRM - powtórz */
+                }
+                if (errno == EIDRM) {
+                    zrzut_do_logu("KLIENT %d: Restauracja zamknieta podczas rejestracji", getpid());
+                    shmdt(r);
+                    exit(0);
+                }
+                perror("[KLIENT] msgrcv - blad odbierania odpowiedzi");
                 shmdt(r);
-                exit(0);
+                exit(EXIT_FAILURE);
             }
-            perror("[KLIENT] msgrcv - blad odbierania odpowiedzi");
-            shmdt(r);
-            exit(EXIT_FAILURE);
+            break;  /* Sukces */
         }
 
         typ_miejsca = odpowiedz.typ_miejsca;
@@ -240,7 +277,7 @@ int main(int argc, char *argv[]) {
                 break; 
             }
             unlock(sem);
-            usleep(100000); /* Czekanie na przydzielenie miejsca */
+            // usleep(100000); /* Czekanie na przydzielenie miejsca */
         }
     }
     
@@ -248,29 +285,23 @@ int main(int argc, char *argv[]) {
     if (moj_slot_idx != -1) r->klienci[moj_slot_idx].segment = moj_segment;
     unlock(sem);
 
+    /* Logowanie faktycznego zajęcia miejsca */
+    if (typ_miejsca == 0) {
+        zrzut_do_logu("KLIENT %d (G=%d): USIADL przy LADZIE %d (seg=%d)",
+                      getpid(), moj_gid, idx_miejsca, moj_segment);
+    } else {
+        zrzut_do_logu("KLIENT %d (G=%d): USIADL przy STOLIKU %d (seg=%d)",
+                      getpid(), moj_gid, idx_miejsca, moj_segment);
+    }
+
     int zjedzone = 0;
     int oczekuje_na_specjalne = 0;
-    
-    while (r->otwarta && zjedzone < do_zjedzenia) {
-        if (!oczekuje_na_specjalne) {
-            if (moj_segment > 15) {
-                if (!ja_jestem_dziecko && rand() % 5000 < moj_segment) {
-                    lock(sem);
-                    for(int i=0; i<MAX_ZAMOWIEN; i++) {
-                        if(!r->zamowienia[i].aktywne) {
-                            int zamowiony_typ = 3 + (rand() % 3);
-                            r->zamowienia[i].pid_klienta = getpid();
-                            r->zamowienia[i].typ_dania = zamowiony_typ;
-                            r->zamowienia[i].aktywne = 1;
-                            oczekuje_na_specjalne = 1;
-                            if(moj_slot_idx != -1) r->klienci[moj_slot_idx].czeka_na_specjalne = 1;
-                            sprintf(r->info, "KLIENT %d (G%d Seg%d) zamowil %s!", getpid(), moj_gid, moj_segment, nazwy_kolorow[zamowiony_typ]);
-                            break;
-                        }
-                    }
-                    unlock(sem);
-                }
-            }
+
+    while (r->otwarta && (zjedzone < do_zjedzenia || oczekuje_na_specjalne)) {
+        /* Inkrementacja głodu przy każdym SIGALRM */
+        if (glod_tick_flag) {
+            glod_tick_flag = 0;
+            if (glod < PROG_GLODU * 2) glod++;  /* Cap żeby nie rosło w nieskończoność */
         }
 
         lock(sem);
@@ -285,13 +316,17 @@ int main(int argc, char *argv[]) {
                     if(moj_slot_idx != -1) r->klienci[moj_slot_idx].czeka_na_specjalne = 0;
                 }
             } else {
-                if (t.id_odbiorcy == -1 && rand() % 100 < 60) czy_jem = 1;
+                /* Je tylko gdy głód >= PROG_GLODU i talerzyk jest dostępny */
+                if (t.id_odbiorcy == -1 && glod >= PROG_GLODU) {
+                    czy_jem = 1;
+                }
             }
 
             if (czy_jem) {
                 r->tasma.seg[moj_segment].zajety = 0;
                 r->sprzedane[t.kolor]++;
                 zjedzone++;
+                glod = 0;  /* Reset głodu po zjedzeniu */
                 /* Zliczanie talerzyków per kolor - lokalnie i w SHM */
                 moje_talerzyki[t.kolor]++;
                 if (moj_slot_idx != -1) {
@@ -301,10 +336,29 @@ int main(int argc, char *argv[]) {
                 /* Aktualizacja licznika grupy */
                 r->grupa_talerzyki[moj_gid][t.kolor]++;
                 printf("[KLIENT %d] Zjadl %s\n", getpid(), nazwy_kolorow[t.kolor]);
+
+                /* Zamówienie specjalne - tylko po zjedzeniu zwykłego talerzyka, nie przy ostatnim */
+                if (moj_segment >= 10 && !ja_jestem_dziecko && !oczekuje_na_specjalne && t.kolor < 3 && zjedzone < do_zjedzenia) {
+                    int szansa = moj_segment - 9;  /* seg 10 = 1%, seg 19 = 10% */
+                    if (rand() % 100 < szansa) {
+                        for (int i = 0; i < MAX_ZAMOWIEN; i++) {
+                            if (!r->zamowienia[i].aktywne) {
+                                int zamowiony_typ = 3 + (rand() % 3);
+                                r->zamowienia[i].pid_klienta = getpid();
+                                r->zamowienia[i].typ_dania = zamowiony_typ;
+                                r->zamowienia[i].aktywne = 1;
+                                oczekuje_na_specjalne = 1;
+                                if (moj_slot_idx != -1) r->klienci[moj_slot_idx].czeka_na_specjalne = 1;
+                                sprintf(r->info, "KLIENT %d (Seg%d) zamowil %s!", getpid(), moj_segment, nazwy_kolorow[zamowiony_typ]);
+                                break;
+                            }
+                        }
+                    }
+                }
             }
         }
         unlock(sem);
-        usleep(500000); /* 0.5s między próbami jedzenia */
+        // usleep(500000); /* 0.5s między próbami jedzenia */
     }
 
     lock(sem);
@@ -340,18 +394,24 @@ int main(int argc, char *argv[]) {
             unlock(sem);
 
             /* Wysłanie żądania do kasy */
-            if (msgsnd(msg, &req, sizeof(struct komunikat_kasa_req) - sizeof(long), 0) == -1) {
-                if (errno != EIDRM) {
-                    perror("[KLIENT] msgsnd - blad wysylania zadania rachunku");
-                }
-            } else {
+            while (msgsnd(msg, &req, sizeof(struct komunikat_kasa_req) - sizeof(long), 0) == -1) {
+                if (errno == EINTR) continue;
+                if (errno == EIDRM) break;
+                perror("[KLIENT] msgsnd - blad wysylania zadania rachunku");
+                break;
+            }
+
+            if (errno != EIDRM) {
                 /* Oczekiwanie na rachunek */
                 struct komunikat_kasa_resp resp;
-                if (msgrcv(msg, &resp, sizeof(struct komunikat_kasa_resp) - sizeof(long), getpid(), 0) == -1) {
-                    if (errno != EIDRM && errno != EINTR) {
-                        perror("[KLIENT] msgrcv - blad odbierania rachunku");
-                    }
-                } else {
+                while (msgrcv(msg, &resp, sizeof(struct komunikat_kasa_resp) - sizeof(long), getpid(), 0) == -1) {
+                    if (errno == EINTR) continue;
+                    if (errno == EIDRM) break;
+                    perror("[KLIENT] msgrcv - blad odbierania rachunku");
+                    break;
+                }
+
+                if (errno != EIDRM && errno != EINTR) {
                     printf("[KLIENT %d] Rachunek dla grupy %d: %d zl\n", getpid(), moj_gid, resp.suma);
                     zrzut_do_logu("KLIENT %d (G=%d): Zaplacil rachunek %d zl", getpid(), moj_gid, resp.suma);
 
@@ -393,6 +453,9 @@ int main(int argc, char *argv[]) {
         r->klienci[moj_slot_idx].aktywny = 0;
     }
     unlock(sem);
+
+    /* Zmniejsz licznik aktywnych klientów */
+    sem_dec(sem, SEM_ACTIVE);
 
     /* Odłączenie od pamięci dzielonej */
     if (shmdt(r) == -1) {

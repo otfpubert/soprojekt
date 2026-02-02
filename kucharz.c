@@ -13,6 +13,7 @@
 #include <sys/ipc.h>
 #include <sys/shm.h>
 #include <sys/sem.h>
+#include <sys/time.h>
 #include <errno.h>
 #include <time.h>
 #include <signal.h>
@@ -20,11 +21,23 @@
 #include "wspolne.h"
 
 /*
- * Zmienna globalna kontrolująca prędkość produkcji (w mikrosekundach).
- * volatile - może być zmieniana przez handlery sygnałów.
- * Domyślnie 1 sekunda = 1000000 us
+ * Flaga sygnału SIGALRM - ustawiana przez handler, czyszczona w pętli.
  */
-volatile int delay = 1000000;
+volatile sig_atomic_t tick_flag = 0;
+
+/*
+ * Interwał produkcji w tickach (1-4).
+ * Startuje od 2 (normalny), może spaść do 1 (2x szybciej) lub wzrosnąć do 4 (2x wolniej).
+ */
+volatile int production_delay = 2;
+
+/*
+ * Handler sygnału SIGALRM - ustawia flagę tick.
+ */
+void handler_alarm(int sig) {
+    (void)sig;
+    tick_flag = 1;
+}
 
 /*
  * Handler sygnału SIGUSR1 - przyspieszenie produkcji 2x.
@@ -32,8 +45,9 @@ volatile int delay = 1000000;
  * przyśpiesza dwukrotnie wydawanie dań z kuchni."
  */
 void handler_szybciej(int sig) {
-    (void)sig; /* Suppress unused parameter warning */
-    delay = 500000; /* 0.5s (2x szybciej) */
+    (void)sig;
+    production_delay = (production_delay > 1) ? production_delay / 2 : 1;
+    printf("[KUCHARZ] Przyspieszenie! Nowy delay: %d tickow\n", production_delay);
 }
 
 /*
@@ -42,8 +56,9 @@ void handler_szybciej(int sig) {
  * zmniejsza o 50% ilość wydawanych dań z kuchni."
  */
 void handler_wolniej(int sig) {
-    (void)sig; /* Suppress unused parameter warning */
-    delay = 2000000; /* 2.0s (50% wolniej) */
+    (void)sig;
+    production_delay = (production_delay < 4) ? production_delay * 2 : 4;
+    printf("[KUCHARZ] Spowolnienie! Nowy delay: %d tickow\n", production_delay);
 }
 
 int main() {
@@ -51,6 +66,9 @@ int main() {
     srand(getpid() ^ time(NULL));
 
     /* Rejestracja handlerów sygnałów */
+    if (signal(SIGALRM, handler_alarm) == SIG_ERR) {
+        perror("[KUCHARZ] signal(SIGALRM)");
+    }
     if (signal(SIGUSR1, handler_szybciej) == SIG_ERR) {
         perror("[KUCHARZ] signal(SIGUSR1)");
         exit(EXIT_FAILURE);
@@ -58,6 +76,16 @@ int main() {
     if (signal(SIGUSR2, handler_wolniej) == SIG_ERR) {
         perror("[KUCHARZ] signal(SIGUSR2)");
         exit(EXIT_FAILURE);
+    }
+
+    /* Konfiguracja timera SIGALRM (co 1 sekundę) */
+    struct itimerval timer;
+    timer.it_value.tv_sec = 1;
+    timer.it_value.tv_usec = 0;
+    timer.it_interval.tv_sec = 1;
+    timer.it_interval.tv_usec = 0;
+    if (setitimer(ITIMER_REAL, &timer, NULL) == -1) {
+        perror("[KUCHARZ] setitimer");
     }
 
     /* Generowanie klucza IPC */
@@ -74,7 +102,7 @@ int main() {
         exit(EXIT_FAILURE);
     }
 
-    int sem = semget(key, 1, 0);
+    int sem = semget(key, NUM_SEMS, 0);
     if (sem == -1) {
         perror("[KUCHARZ] semget");
         exit(EXIT_FAILURE);
@@ -95,7 +123,22 @@ int main() {
     sprintf(r->info, "KUCHARZ: Gotowy (PID=%d)!", getpid());
     unlock(sem);
 
+    int tick_counter = 0;  /* Licznik ticków dla zmiennej prędkości */
+
     while (r->otwarta) {
+        /* Czekaj na sygnał SIGALRM (pause() nie używa CPU) */
+        while (!tick_flag && r->otwarta) {
+            pause();
+        }
+        tick_flag = 0;
+        tick_counter++;
+
+        /* Sprawdź czy minęło wystarczająco ticków (dla zmiennej prędkości) */
+        if (tick_counter < production_delay) {
+            continue;  /* Jeszcze nie czas na produkcję */
+        }
+        tick_counter = 0;
+
         int k = -1;
         int dla_kogo = -1;
         int idx_zamowienia = -1;
@@ -106,9 +149,9 @@ int main() {
                 k = r->zamowienia[i].typ_dania;
                 dla_kogo = r->zamowienia[i].pid_klienta;
                 idx_zamowienia = i;
-                
+
                 sprintf(r->info, "KUCHARZ: Specjalne %s dla %d...", nazwy_kolorow[k], dla_kogo);
-                break; 
+                break;
             }
         }
         unlock(sem);
@@ -123,34 +166,28 @@ int main() {
         nowy.cena = ceny[k];
         nowy.id_odbiorcy = dla_kogo;
 
-        int polozony = 0;
-        while (r->otwarta && !polozony) {
-            lock(sem);
-            if (!r->tasma.seg[0].zajety) {
-                /* Sprawdź czy zamówienie specjalne jest jeszcze aktywne */
-                if (idx_zamowienia != -1) {
-                    if (!r->zamowienia[idx_zamowienia].aktywne) {
-                        /* Klient anulował - zmień na zwykły talerzyk */
-                        nowy.id_odbiorcy = -1;
-                        idx_zamowienia = -1;
-                        sprintf(r->info, "KUCHARZ: Zamowienie anulowane, %s -> zwykly", nazwy_kolorow[k]);
-                    }
+        lock(sem);
+        if (!r->tasma.seg[0].zajety) {
+            /* Sprawdź czy zamówienie specjalne jest jeszcze aktywne */
+            if (idx_zamowienia != -1) {
+                if (!r->zamowienia[idx_zamowienia].aktywne) {
+                    /* Klient anulował - zmień na zwykły talerzyk */
+                    nowy.id_odbiorcy = -1;
+                    idx_zamowienia = -1;
+                    sprintf(r->info, "KUCHARZ: Zamowienie anulowane, %s -> zwykly", nazwy_kolorow[k]);
                 }
-
-                r->tasma.seg[0].zajety = 1;
-                r->tasma.seg[0].t = nowy;
-                r->wyprodukowane[k]++;
-
-                if (idx_zamowienia != -1) {
-                    r->zamowienia[idx_zamowienia].aktywne = 0;
-                    sprintf(r->info, "KUCHARZ: Wydano %s dla %d!", nazwy_kolorow[k], dla_kogo);
-                }
-
-                polozony = 1;
             }
-            unlock(sem);
-            if (!polozony) usleep(500000); /* 0.5s czekania na miejsce na taśmie */
+
+            r->tasma.seg[0].zajety = 1;
+            r->tasma.seg[0].t = nowy;
+            r->wyprodukowane[k]++;
+
+            if (idx_zamowienia != -1) {
+                r->zamowienia[idx_zamowienia].aktywne = 0;
+                sprintf(r->info, "KUCHARZ: Wydano %s dla %d!", nazwy_kolorow[k], dla_kogo);
+            }
         }
+        unlock(sem);
     }
 
     printf("[KUCHARZ] Restauracja zamknieta. Generowanie raportu produkcji...\n");

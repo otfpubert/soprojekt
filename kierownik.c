@@ -102,8 +102,9 @@ int main() {
             continue;
         }
 
-        /* Pobieramy aktualny PID kucharza z pamięci */
+        /* Pobieramy aktualny PID kucharza i taśmy z pamięci */
         pid_t kucharz = r->pid_kucharza;
+        pid_t tasma = r->pid_tasmy;
 
         switch (wybor) {
             case 1:
@@ -112,16 +113,21 @@ int main() {
                     printf("[BLAD] Kucharz nie zglosil PIDu! (pid=%d)\n", kucharz);
                     break;
                 }
-                /* Wysłanie sygnału z obsługą błędów */
+                /* Wysłanie sygnału do kucharza */
                 if (kill(kucharz, SIGUSR1) == -1) {
                     if (errno == ESRCH) {
                         printf("[BLAD] Kucharz (PID=%d) nie istnieje!\n", kucharz);
                     } else {
-                        perror("[KIEROWNIK] kill(SIGUSR1)");
+                        perror("[KIEROWNIK] kill(SIGUSR1) kucharz");
                     }
                 } else {
                     printf("-> Wyslano SIGUSR1 do Kucharza (PID=%d) - przyspieszenie 2x\n", kucharz);
                     zrzut_do_logu("KIEROWNIK: Sygnal SIGUSR1 do kucharza %d", kucharz);
+                }
+                /* Wysłanie sygnału do taśmy (proporcjonalne przyspieszenie) */
+                if (tasma > 0 && kill(tasma, SIGUSR1) == 0) {
+                    printf("-> Wyslano SIGUSR1 do Tasmy (PID=%d) - przyspieszenie 2x\n", tasma);
+                    zrzut_do_logu("KIEROWNIK: Sygnal SIGUSR1 do tasmy %d", tasma);
                 }
                 break;
 
@@ -131,16 +137,21 @@ int main() {
                     printf("[BLAD] Kucharz nie zglosil PIDu! (pid=%d)\n", kucharz);
                     break;
                 }
-                /* Wysłanie sygnału z obsługą błędów */
+                /* Wysłanie sygnału do kucharza */
                 if (kill(kucharz, SIGUSR2) == -1) {
                     if (errno == ESRCH) {
                         printf("[BLAD] Kucharz (PID=%d) nie istnieje!\n", kucharz);
                     } else {
-                        perror("[KIEROWNIK] kill(SIGUSR2)");
+                        perror("[KIEROWNIK] kill(SIGUSR2) kucharz");
                     }
                 } else {
                     printf("-> Wyslano SIGUSR2 do Kucharza (PID=%d) - spowolnienie 50%%\n", kucharz);
                     zrzut_do_logu("KIEROWNIK: Sygnal SIGUSR2 do kucharza %d", kucharz);
+                }
+                /* Wysłanie sygnału do taśmy (proporcjonalne spowolnienie) */
+                if (tasma > 0 && kill(tasma, SIGUSR2) == 0) {
+                    printf("-> Wyslano SIGUSR2 do Tasmy (PID=%d) - spowolnienie 50%%\n", tasma);
+                    zrzut_do_logu("KIEROWNIK: Sygnal SIGUSR2 do tasmy %d", tasma);
                 }
                 break;
 
@@ -155,11 +166,11 @@ int main() {
                         if (kill(r->klienci[i].pid, SIGTERM) == 0) {
                             ewakuowani++;
                         }
-                        /* Ignorujemy błędy - proces mógł już się zakończyć */
                     }
                 }
 
-                r->otwarta = 0; /* Zamykamy lokal logicznie */
+                r->przyjmuje_klientow = 0; /* Stop tworzenia nowych klientów */
+                r->otwarta = 0;           /* Zamykamy lokal logicznie */
                 printf("-> Ewakuowano %d klientow. Restauracja zamknieta.\n", ewakuowani);
                 zrzut_do_logu("KIEROWNIK: Ewakuowano %d klientow", ewakuowani);
                 break;

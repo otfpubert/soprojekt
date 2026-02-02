@@ -16,10 +16,22 @@
 #include <sys/shm.h>
 #include <sys/sem.h>
 #include <sys/msg.h>
+#include <sys/time.h>
 #include <errno.h>
 #include <signal.h>
 
 #include "wspolne.h"
+
+/*
+ * Flaga sygnału SIGALRM - ustawiana przez handler, czyszczona w pętli.
+ */
+volatile sig_atomic_t refresh_flag = 0;
+
+/* Handler SIGALRM - ustawia flagę odświeżenia */
+void handler_refresh(int sig) {
+    (void)sig;
+    refresh_flag = 1;
+}
 
 /* Kolory ANSI dla terminala */
 #define ANSI_RESET   "\033[0m"
@@ -113,7 +125,7 @@ void generuj_podsumowanie(struct restauracja *r) {
     fprintf(f, "+---------------+------+\n\n");
 
     /* Walidacja spójności danych */
-    fprintf(f, "--- WALIDACJA ---\n");
+    fprintf(f, "--- WALIDACJA TALERZYKOW ---\n");
     int suma_prod = 0;
     for (int i = 0; i < KOLORY; i++) suma_prod += r->wyprodukowane[i];
     int oczekiwane = suma_szt + suma_pozostale;
@@ -125,6 +137,62 @@ void generuj_podsumowanie(struct restauracja *r) {
                 suma_prod, suma_szt, suma_pozostale, oczekiwane);
         fprintf(f, "Roznica: %d (moga byc talerzyki w tranzycie)\n\n",
                 suma_prod - oczekiwane);
+    }
+
+    /* Weryfikacja klientów - ile pozostało aktywnych (powinno być 0) */
+    fprintf(f, "--- WALIDACJA KLIENTOW ---\n");
+    int aktywni = 0;
+    int vip_cnt = 0;
+    int child_cnt = 0;
+    for (int i = 0; i < MAX_KLIENTOW; i++) {
+        if (r->klienci[i].aktywny) {
+            aktywni++;
+            if (r->klienci[i].is_vip) vip_cnt++;
+            if (r->klienci[i].is_child) child_cnt++;
+        }
+    }
+    if (aktywni == 0) {
+        fprintf(f, "OK: Wszyscy klienci opuscili restauracje\n");
+    } else {
+        fprintf(f, "UWAGA: Pozostalo %d aktywnych klientow (VIP:%d, dzieci:%d)\n",
+                aktywni, vip_cnt, child_cnt);
+    }
+
+    /* Weryfikacja miejsc - czy wszystkie wolne */
+    int lada_zajete = 0;
+    for (int i = 0; i < LADA_MIEJSC; i++) {
+        if (r->lada[i].zajete) lada_zajete++;
+    }
+    int stoliki_zajete = 0;
+    for (int i = 0; i < STOLIKI; i++) {
+        if (r->stoliki[i].ile_osob > 0) stoliki_zajete++;
+    }
+    if (lada_zajete == 0 && stoliki_zajete == 0) {
+        fprintf(f, "OK: Wszystkie miejsca zwolnione\n");
+    } else {
+        fprintf(f, "UWAGA: Lada zajeta: %d/%d, Stoliki zajete: %d/%d\n",
+                lada_zajete, LADA_MIEJSC, stoliki_zajete, STOLIKI);
+    }
+
+    /* Weryfikacja płatności */
+    int grupy_bez_platnosci = 0;
+    for (int i = 0; i < MAX_GRUP; i++) {
+        /* Sprawdzamy tylko grupy które jadły (mają talerzyki) */
+        int grupa_jadla = 0;
+        for (int j = 0; j < KOLORY; j++) {
+            if (r->grupa_talerzyki[i][j] > 0) {
+                grupa_jadla = 1;
+                break;
+            }
+        }
+        if (grupa_jadla && !r->grupa_zaplacila[i]) {
+            grupy_bez_platnosci++;
+        }
+    }
+    if (grupy_bez_platnosci == 0) {
+        fprintf(f, "OK: Wszystkie grupy zaplacily\n\n");
+    } else {
+        fprintf(f, "UWAGA: %d grup nie zaplacilo!\n\n", grupy_bez_platnosci);
     }
 
     fprintf(f, "========================================\n");
@@ -176,6 +244,9 @@ void wstaw_do_kolejki(wpis_kolejki *q, int *cnt, pid_t pid, int priority) {
 }
 
 void dodaj_do_kolejki(int rozmiar, int priority, pid_t pid) {
+    if (priority) {
+        zrzut_do_logu("OBSLUGA: VIP grupa G%d (PID=%d) dodana z priorytetem!", rozmiar, pid);
+    }
     if (rozmiar == 1) wstaw_do_kolejki(queue_g1, &q1_cnt, pid, priority);
     else if (rozmiar == 2) wstaw_do_kolejki(queue_g2, &q2_cnt, pid, priority);
     else if (rozmiar == 3) wstaw_do_kolejki(queue_g3, &q3_cnt, pid, priority);
@@ -234,7 +305,7 @@ int main() {
         exit(EXIT_FAILURE);
     }
 
-    int sem = semget(key, 1, 0);
+    int sem = semget(key, NUM_SEMS, 0);
     if (sem == -1) {
         perror("[OBSLUGA] semget - nie mozna polaczyc z semaforem");
         exit(EXIT_FAILURE);
@@ -254,6 +325,21 @@ int main() {
     }
 
     printf("[OBSLUGA] Polaczono z zasobami IPC (shm=%d, sem=%d, msg=%d)\n", shm, sem, msg);
+
+    /* Rejestracja handlera SIGALRM dla timera odświeżania */
+    if (signal(SIGALRM, handler_refresh) == SIG_ERR) {
+        perror("[OBSLUGA] signal(SIGALRM)");
+    }
+
+    /* Konfiguracja timera SIGALRM (co 1 sekundę) */
+    struct itimerval timer;
+    timer.it_value.tv_sec = 1;
+    timer.it_value.tv_usec = 0;
+    timer.it_interval.tv_sec = 1;
+    timer.it_interval.tv_usec = 0;
+    if (setitimer(ITIMER_REAL, &timer, NULL) == -1) {
+        perror("[OBSLUGA] setitimer");
+    }
 
     /* Inicjalizacja statystyk kasy */
     lock(sem);
@@ -449,11 +535,36 @@ int main() {
         // 3. WYSWIETLANIE
         printf("\033[H\033[J"); /* ANSI: kursor home + clear (szybsze niż system("clear")) */
         printf("\n=== MONITOR SALI I KOLEJEK ===\n");
-        printf("Kolejki: G4:[%d:%d] G3:[%d:%d] G2:[%d:%d] G1:[%d:%d]\n", 
-               q4_cnt, queue_g4[0].group_priority, 
-               q3_cnt, queue_g3[0].group_priority, 
-               q2_cnt, queue_g2[0].group_priority, 
-               q1_cnt, queue_g1[0].group_priority);
+
+        /* Liczenie VIP w każdej kolejce */
+        int vip_g4 = 0, vip_g3 = 0, vip_g2 = 0, vip_g1 = 0;
+        for (int i = 0; i < q4_cnt; i++) if (queue_g4[i].group_priority) vip_g4++;
+        for (int i = 0; i < q3_cnt; i++) if (queue_g3[i].group_priority) vip_g3++;
+        for (int i = 0; i < q2_cnt; i++) if (queue_g2[i].group_priority) vip_g2++;
+        for (int i = 0; i < q1_cnt; i++) if (queue_g1[i].group_priority) vip_g1++;
+
+        /* Uproszczony widok kolejek */
+        printf("+----------+-------+-----+--------+----------------------+\n");
+        printf("| KOLEJKA  | TOTAL | VIP | NORMAL | KOLEJNOSC (V=vip)    |\n");
+        printf("+----------+-------+-----+--------+----------------------+\n");
+
+        printf("| G4 (4os) | %5d | %3d | %6d | ", q4_cnt, vip_g4, q4_cnt - vip_g4);
+        for (int i = 0; i < q4_cnt && i < 15; i++) printf("%c", queue_g4[i].group_priority ? 'V' : '.');
+        printf("\n");
+
+        printf("| G3 (3os) | %5d | %3d | %6d | ", q3_cnt, vip_g3, q3_cnt - vip_g3);
+        for (int i = 0; i < q3_cnt && i < 15; i++) printf("%c", queue_g3[i].group_priority ? 'V' : '.');
+        printf("\n");
+
+        printf("| G2 (2os) | %5d | %3d | %6d | ", q2_cnt, vip_g2, q2_cnt - vip_g2);
+        for (int i = 0; i < q2_cnt && i < 15; i++) printf("%c", queue_g2[i].group_priority ? 'V' : '.');
+        printf("\n");
+
+        printf("| G1 (1os) | %5d | %3d | %6d | ", q1_cnt, vip_g1, q1_cnt - vip_g1);
+        for (int i = 0; i < q1_cnt && i < 15; i++) printf("%c", queue_g1[i].group_priority ? 'V' : '.');
+        printf("\n");
+
+        printf("+----------+-------+-----+--------+----------------------+\n");
         printf("---------------------------------------------------------------------------------\n");
         printf("| SEG |       MIEJSCE       |          NA TASMIE           |      KLIENCI       \n");
         printf("---------------------------------------------------------------------------------\n");
@@ -464,10 +575,25 @@ int main() {
             if (seg == 0) sprintf(bufor_miejsca, "KUCHARZ");
             else if (seg >= 1 && seg <= 9) {
                 int idx = seg - 1;
-                sprintf(bufor_miejsca, "LADA %d %s", idx, r->lada[idx].zajete ? "(ZAJ)" : "(wol)");
+                /* Sprawdzamy czy faktycznie ktoś siedzi przy ladzie */
+                int ktos_siedzi = 0;
+                for (int k = 0; k < MAX_KLIENTOW; k++) {
+                    if (r->klienci[k].aktywny && r->klienci[k].segment == seg) {
+                        ktos_siedzi = 1;
+                        break;
+                    }
+                }
+                sprintf(bufor_miejsca, "LADA %d %s", idx, ktos_siedzi ? "(ZAJ)" : "(wol)");
             } else {
                 int idx = seg - 10;
-                sprintf(bufor_miejsca, "STOL %d (%d/%d)", idx, r->stoliki[idx].ile_osob, r->stoliki[idx].pojemnosc);
+                /* Liczymy faktycznych klientów przy stoliku zamiast używać ile_osob (rezerwacja) */
+                int faktyczni = 0;
+                for (int k = 0; k < MAX_KLIENTOW; k++) {
+                    if (r->klienci[k].aktywny && r->klienci[k].segment == seg) {
+                        faktyczni++;
+                    }
+                }
+                sprintf(bufor_miejsca, "STOL %d (%d/%d)", idx, faktyczni, r->stoliki[idx].pojemnosc);
             }
             printf("%-18s | ", bufor_miejsca);
 
@@ -504,11 +630,24 @@ int main() {
             printf("\n");
         }
         printf("---------------------------------------------------------------------------------\n");
-        printf("[KASA] Transakcje: %d | Utarg: %d zl\n", r->kasa.transakcje, r->kasa.suma_dzienna);
+        /* Status restauracji */
+        const char *status;
+        if (!r->otwarta) {
+            status = "ZAMKNIETA";
+        } else if (!r->przyjmuje_klientow) {
+            status = "NIE PRZYJMUJE NOWYCH KLIENTOW";
+        } else {
+            status = "OTWARTA";
+        }
+        printf("[STATUS]: %s | [KASA] Transakcje: %d | Utarg: %d zl\n", status, r->kasa.transakcje, r->kasa.suma_dzienna);
         printf("[INFO]: %s\n", r->info);
         fflush(stdout);
 
-        sleep(1); /* Odświeżanie co 1s */
+        /* Czekaj na tick timera (SIGALRM) - nie busy-wait! */
+        while (!refresh_flag && r->otwarta) {
+            pause();  /* Blokuje do otrzymania sygnału */
+        }
+        refresh_flag = 0;
     }
 
     printf("[OBSLUGA] Restauracja zamknieta. Generowanie raportu...\n");

@@ -14,6 +14,7 @@
 #include <sys/shm.h>
 #include <sys/sem.h>
 #include <sys/msg.h>
+#include <sys/time.h>
 #include <time.h>
 #include <string.h>
 #include <signal.h>
@@ -23,6 +24,15 @@
 #include "wspolne.h"
 
 #define LICZBA_GRUP 30  /* Liczba grup do symulacji */
+
+/* Flaga timera do tworzenia grup */
+volatile sig_atomic_t utworz_grupe_flag = 0;
+
+/* Handler SIGALRM - sygnalizuje że można utworzyć nową grupę */
+void handler_nowa_grupa(int sig) {
+    (void)sig;
+    utworz_grupe_flag = 1;
+}
 
 /* Globalne ID zasobów IPC do sprzątania przy wyjściu */
 int g_shm_id = -1;
@@ -103,7 +113,7 @@ int main() {
            g_shm_id, sizeof(struct restauracja));
 
     /* Tworzenie semafora */
-    g_sem_id = semget(key, 1, IPC_CREAT | PRAWA);
+    g_sem_id = semget(key, NUM_SEMS, IPC_CREAT | PRAWA);
     if (g_sem_id == -1) {
         perror("[MAIN] semget - nie mozna utworzyc semafora");
         shmctl(g_shm_id, IPC_RMID, NULL); /* Sprzątamy już utworzoną pamięć */
@@ -121,9 +131,15 @@ int main() {
     }
     printf("[MAIN] Kolejka komunikatow utworzona (id=%d)\n", g_msg_id);
 
-    /* Inicjalizacja semafora na wartość 1 (mutex) */
-    if (semctl(g_sem_id, 0, SETVAL, 1) == -1) {
-        perror("[MAIN] semctl SETVAL - nie mozna zainicjalizowac semafora");
+    /* Inicjalizacja semafora mutex na wartość 1 */
+    if (semctl(g_sem_id, SEM_MUTEX, SETVAL, 1) == -1) {
+        perror("[MAIN] semctl SETVAL SEM_MUTEX");
+        sprzatanie(0);
+    }
+
+    /* Inicjalizacja semafora licznika aktywnych klientów na 0 */
+    if (semctl(g_sem_id, SEM_ACTIVE, SETVAL, 0) == -1) {
+        perror("[MAIN] semctl SETVAL SEM_ACTIVE");
         sprzatanie(0);
     }
 
@@ -222,7 +238,38 @@ int main() {
     printf("[MAIN] Uruchamianie grup klientow (max %d, czas pracy: %ds)...\n",
            LICZBA_GRUP, CZAS_ZAMKNIECIA);
 
-    for (int g = 0; g < LICZBA_GRUP; g++) {
+    /* Rejestracja handlera SIGALRM dla timera grup */
+    if (signal(SIGALRM, handler_nowa_grupa) == SIG_ERR) {
+        perror("[MAIN] signal(SIGALRM)");
+    }
+
+    /* Funkcja pomocnicza do ustawienia losowego timera (1-3 sekundy) */
+    struct itimerval timer_grup;
+    timer_grup.it_interval.tv_sec = 0;  /* Jednorazowy */
+    timer_grup.it_interval.tv_usec = 0;
+
+    /* Ustawienie pierwszego timera (od razu pierwsza grupa) */
+    utworz_grupe_flag = 1;
+
+    int g = 0;
+    while (g < LICZBA_GRUP && r->otwarta) {
+        /* Czekaj na sygnał SIGALRM (nie busy-wait) */
+        while (!utworz_grupe_flag && r->otwarta) {
+            /* Sprawdź czy czas zamknięcia */
+            time_t teraz = time(NULL);
+            int czas_od_startu = (int)(teraz - r->czas_startu);
+            if (czas_od_startu >= CZAS_ZAMKNIECIA) {
+                break;
+            }
+            pause();  /* Blokuj do sygnału */
+        }
+
+        /* Sprawdź czy ewakuacja (kierownik zamknął restaurację) */
+        if (!r->otwarta) {
+            printf("[MAIN] Restauracja zamknieta przez kierownika. Przerywam tworzenie grup.\n");
+            break;
+        }
+
         /* Sprawdzenie czy restauracja nadal przyjmuje klientów */
         time_t teraz = time(NULL);
         int czas_od_startu = (int)(teraz - r->czas_startu);
@@ -236,6 +283,8 @@ int main() {
             unlock(g_sem_id);
             break;  /* Przerywamy tworzenie nowych grup */
         }
+
+        utworz_grupe_flag = 0;
 
         int rozmiar = 1 + rand() % 4;
 
@@ -316,29 +365,29 @@ int main() {
             /* Proces macierzysty kontynuuje pętlę */
         }
 
-        /* Przerwa między grupami */
-        usleep(1500000); /* 1.5 sekundy między grupami */
+        g++;
+
+        /* Ustawienie losowego timera na następną grupę (1-3 sekundy) */
+        int losowy_delay = 1 + rand() % 3;
+        timer_grup.it_value.tv_sec = losowy_delay;
+        timer_grup.it_value.tv_usec = 0;
+        if (setitimer(ITIMER_REAL, &timer_grup, NULL) == -1) {
+            perror("[MAIN] setitimer dla grup");
+        }
     }
+
+    /* Ustawienie statusu - nie przyjmujemy nowych klientów */
+    lock(g_sem_id);
+    r->przyjmuje_klientow = 0;
+    sprintf(r->info, "Restauracja nie przyjmuje nowych klientow. Obslugujemy pozostalych.");
+    unlock(g_sem_id);
 
     printf("[MAIN] Koniec przyjmowania nowych klientow.\n");
 
-    /* Czekamy aż wszyscy klienci zostaną obsłużeni (przed zamknięciem) */
-    printf("[MAIN] Czekam az wszyscy obecni klienci zostana obsluzeni...\n");
-    while (1) {
-        lock(g_sem_id);
-        int aktywni = 0;
-        for (int i = 0; i < MAX_KLIENTOW; i++) {
-            if (r->klienci[i].aktywny) aktywni++;
-        }
-        unlock(g_sem_id);
-
-        if (aktywni == 0) {
-            printf("[MAIN] Wszyscy klienci obsluzeni. Zamykanie restauracji.\n");
-            break;
-        }
-        printf("[MAIN] Pozostalo %d aktywnych klientow. Czekam...\n", aktywni);
-        sleep(2);
-    }
+    /* Czekamy aż wszyscy klienci wyjdą (semafor licznikowy) */
+    printf("[MAIN] Czekam az wszyscy klienci wyjda (sem_wait_zero)...\n");
+    sem_wait_zero(g_sem_id, SEM_ACTIVE);
+    printf("[MAIN] Wszyscy klienci wyszli. Zamykanie restauracji.\n");
 
     /* Zamknięcie restauracji - to zatrzyma pętle w innych procesach */
     lock(g_sem_id);
@@ -347,7 +396,7 @@ int main() {
     unlock(g_sem_id);
 
     /* Dajemy czas procesom na zakończenie i wygenerowanie raportów */
-    sleep(2);
+    // sleep(2);
 
     printf("[MAIN] Oczekiwanie na zakonczenie procesow potomnych...\n");
 

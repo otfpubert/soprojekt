@@ -1,7 +1,7 @@
 #ifndef WSPOLNE_H
 #define WSPOLNE_H
 
-#define _XOPEN_SOURCE 700 // Wymagane dla usleep i sigaction
+#define _XOPEN_SOURCE 700 
 
 #include <sys/sem.h>
 #include <sys/types.h>
@@ -22,7 +22,6 @@
 /*
  * Funkcja pomocnicza do obsługi błędów systemowych.
  * Jeśli ret == -1, wypisuje komunikat błędu i kończy program.
- * Zgodne z wymaganiem 4.1.c - perror() i errno.
  */
 static inline void check_error(int ret, const char *msg) {
     if (ret == -1) {
@@ -213,22 +212,61 @@ static inline void unlock(int sem) {
 static inline void zrzut_do_logu(const char *format, ...) {
     int fd = open("debug.log", O_WRONLY | O_CREAT | O_APPEND, 0644);
     if (fd == -1) return;
-    
+
     char buffer[512];
     time_t now; time(&now);
     char *date = ctime(&now);
     if (date) date[strlen(date) - 1] = '\0';
-    
+
     int len = sprintf(buffer, "[%s] ", date ? date : "UNKNOWN");
-    
+
     va_list args;
     va_start(args, format);
     len += vsprintf(buffer + len, format, args);
     va_end(args);
-    
+
     buffer[len] = '\n';
     write(fd, buffer, len + 1);
     close(fd);
+}
+
+/* === SEMAFORY ROZSZERZONE === */
+#define SEM_MUTEX   0   /* Istniejący mutex */
+#define SEM_ACTIVE  1   /* Licznik aktywnych klientów */
+#define NUM_SEMS    2   /* Łączna liczba semaforów */
+
+/*
+ * Inkrementacja semafora (dla licznika).
+ */
+static inline void sem_inc(int sem_id, int idx) {
+    struct sembuf sb = {idx, 1, 0};
+    if (semop(sem_id, &sb, 1) == -1) {
+        if (errno != EINTR && errno != EIDRM) {
+            perror("sem_inc: semop");
+        }
+    }
+}
+
+/*
+ * Dekrementacja semafora (dla licznika).
+ */
+static inline void sem_dec(int sem_id, int idx) {
+    struct sembuf sb = {idx, -1, 0};
+    if (semop(sem_id, &sb, 1) == -1) {
+        if (errno != EINTR && errno != EIDRM) {
+            perror("sem_dec: semop");
+        }
+    }
+}
+
+/*
+ * Czekanie aż semafor osiągnie wartość 0.
+ */
+static inline void sem_wait_zero(int sem_id, int idx) {
+    struct sembuf sb = {idx, 0, 0};
+    while (semop(sem_id, &sb, 1) == -1) {
+        if (errno != EINTR) break;
+    }
 }
 
 #endif
