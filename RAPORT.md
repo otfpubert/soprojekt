@@ -314,7 +314,7 @@ PROG_GLODU = 15
 
 ### 2.1 Tworzenie i obsługa plików
 
-#### open() - wspolne.h:214
+#### [open() - wspolne.h:214](https://github.com/otfpubert/SOPROJEKT/blob/main/wspolne.h#L214)
 
 Funkcja `open()` otwiera plik do zapisu. Używamy flag:
 - `O_WRONLY` - tylko do zapisu
@@ -328,7 +328,7 @@ int fd = open("debug.log", O_WRONLY | O_CREAT | O_APPEND, 0644);
 if (fd == -1) return;
 ```
 
-#### write() - wspolne.h:230
+#### [write() - wspolne.h:230](https://github.com/otfpubert/SOPROJEKT/blob/main/wspolne.h#L230)
 
 Funkcja `write()` zapisuje dane do pliku. Przyjmuje:
 - `fd` - deskryptor pliku (zwrócony przez open)
@@ -342,7 +342,7 @@ buffer[len] = '\n';
 write(fd, buffer, len + 1);
 ```
 
-#### close() - wspolne.h:231
+#### [close() - wspolne.h:231](https://github.com/otfpubert/SOPROJEKT/blob/main/wspolne.h#L231)
 
 Funkcja `close()` zamyka deskryptor pliku i zwalnia zasoby systemowe.
 Każdy otwarty plik powinien być zamknięty po zakończeniu pracy.
@@ -351,7 +351,7 @@ Każdy otwarty plik powinien być zamknięty po zakończeniu pracy.
 close(fd);
 ```
 
-#### fopen() - obsluga.c:72
+#### [fopen() - obsluga.c:72](https://github.com/otfpubert/SOPROJEKT/blob/main/obsluga.c#L72)
 
 Funkcja `fopen()` otwiera plik w trybie wysokopoziomowym (biblioteka stdio).
 Tryb `"w"` oznacza zapis z nadpisaniem (jeśli plik istnieje, zostanie wyczyszczony).
@@ -365,7 +365,7 @@ if (!f) {
 }
 ```
 
-#### fprintf() - obsluga.c:78-80
+#### [fprintf() - obsluga.c:78-80](https://github.com/otfpubert/SOPROJEKT/blob/main/obsluga.c#L78-L80)
 
 Funkcja `fprintf()` zapisuje sformatowany tekst do pliku.
 Działa jak `printf()`, ale pierwszy argument to wskaźnik na plik.
@@ -377,7 +377,7 @@ fprintf(f, "    RAPORT DZIENNY - KAITEN ZUSHI\n");
 fprintf(f, "========================================\n\n");
 ```
 
-#### fclose() - obsluga.c:202
+#### [fclose() - obsluga.c:202](https://github.com/otfpubert/SOPROJEKT/blob/main/obsluga.c#L202)
 
 Funkcja `fclose()` zamyka plik otwarty przez fopen().
 Automatycznie opróżnia bufor (flush) przed zamknięciem.
@@ -390,7 +390,7 @@ fclose(f);
 
 ### 2.2 Tworzenie procesów
 
-#### fork() - main.c:203
+#### [fork() - main.c:203](https://github.com/otfpubert/SOPROJEKT/blob/main/main.c#L203)
 
 Funkcja `fork()` tworzy nowy proces (potomny) będący kopią procesu macierzystego.
 Zwraca:
@@ -408,7 +408,7 @@ if (pid_kucharz == -1) {
 }
 ```
 
-#### fork() - main.c:338 (tworzenie klientów w pętli)
+#### [fork() - main.c:338](https://github.com/otfpubert/SOPROJEKT/blob/main/main.c#L338) (tworzenie klientów w pętli)
 
 Tutaj fork() jest wywoływany w pętli, tworząc wiele procesów klientów.
 Każdy klient to osobny proces z własnym PID.
@@ -422,7 +422,7 @@ if (pid_klient == -1) {
 }
 ```
 
-#### execl() - main.c:208
+#### [execl() - main.c:208](https://github.com/otfpubert/SOPROJEKT/blob/main/main.c#L208)
 
 Funkcja `execl()` zastępuje bieżący proces nowym programem.
 Argumenty:
@@ -441,7 +441,7 @@ Jeśli execl() zwróci, oznacza to błąd.
 }
 ```
 
-#### execl() - main.c:354 (z argumentami)
+#### [execl() - main.c:354](https://github.com/otfpubert/SOPROJEKT/blob/main/main.c#L354) (z argumentami)
 
 Ta wersja execl() przekazuje argumenty do procesu klienta:
 - gid - ID grupy
@@ -469,7 +469,7 @@ Argumenty są przekazywane jako stringi (sprintf konwertuje int na string).
 }
 ```
 
-#### exit() - main.c:210
+#### [exit() - main.c:210](https://github.com/otfpubert/SOPROJEKT/blob/main/main.c#L210)
 
 Funkcja `exit()` kończy proces z podanym kodem wyjścia.
 `EXIT_FAILURE` (wartość 1) oznacza błąd.
@@ -482,7 +482,7 @@ perror("[MAIN] execl(kucharz) - nie mozna uruchomic");
 exit(EXIT_FAILURE);
 ```
 
-#### exit() - main.c:83 (w handlerze sprzątania)
+#### [exit() - main.c:83](https://github.com/otfpubert/SOPROJEKT/blob/main/main.c#L83) (w handlerze sprzątania)
 
 Tutaj exit(0) kończy program po sprzątaniu zasobów IPC.
 Kod 0 oznacza sukces - sprzątanie zakończyło się poprawnie.
@@ -492,7 +492,7 @@ printf("[MAIN] Sprzatanie zakonczone. Koniec programu.\n");
 exit(0);
 ```
 
-#### wait() - main.c:400
+#### [wait() - main.c:400](https://github.com/otfpubert/SOPROJEKT/blob/main/main.c#L400)
 
 Funkcja `wait()` blokuje proces macierzysty do zakończenia dowolnego potomka.
 Zwraca PID zakończonego potomka lub -1 gdy nie ma więcej potomków.
@@ -521,7 +521,7 @@ while ((child_pid = wait(&status)) > 0) {
 
 ### 2.3 Obsługa sygnałów
 
-#### signal() - main.c:93 (SIGINT)
+#### [signal() - main.c:93](https://github.com/otfpubert/SOPROJEKT/blob/main/main.c#L93) (SIGINT)
 
 Funkcja `signal()` rejestruje handler dla danego sygnału.
 SIGINT jest wysyłany gdy użytkownik naciśnie Ctrl+C.
@@ -536,7 +536,7 @@ if (signal(SIGINT, sprzatanie) == SIG_ERR) {
 }
 ```
 
-#### signal() - kucharz.c:69 (SIGALRM)
+#### [signal() - kucharz.c:69](https://github.com/otfpubert/SOPROJEKT/blob/main/kucharz.c#L69) (SIGALRM)
 
 SIGALRM jest wysyłany przez timer systemowy (setitimer).
 Handler `handler_alarm` ustawia flagę, która jest sprawdzana w pętli głównej.
@@ -548,7 +548,7 @@ if (signal(SIGALRM, handler_alarm) == SIG_ERR) {
 }
 ```
 
-#### signal() - kucharz.c:72 (SIGUSR1)
+#### [signal() - kucharz.c:72](https://github.com/otfpubert/SOPROJEKT/blob/main/kucharz.c#L72) (SIGUSR1)
 
 SIGUSR1 to sygnał użytkownika nr 1 - używamy go do przyspieszenia produkcji.
 Kierownik wysyła ten sygnał gdy chce żeby kucharz pracował szybciej.
@@ -561,7 +561,7 @@ if (signal(SIGUSR1, handler_szybciej) == SIG_ERR) {
 }
 ```
 
-#### signal() - kucharz.c:76 (SIGUSR2)
+#### [signal() - kucharz.c:76](https://github.com/otfpubert/SOPROJEKT/blob/main/kucharz.c#L76) (SIGUSR2)
 
 SIGUSR2 to sygnał użytkownika nr 2 - używamy go do spowolnienia produkcji.
 Kierownik wysyła ten sygnał gdy chce żeby kucharz pracował wolniej.
@@ -574,7 +574,7 @@ if (signal(SIGUSR2, handler_wolniej) == SIG_ERR) {
 }
 ```
 
-#### signal() - klient.c:63 (SIGTERM)
+#### [signal() - klient.c:63](https://github.com/otfpubert/SOPROJEKT/blob/main/klient.c#L63) (SIGTERM)
 
 SIGTERM to sygnał zakończenia - używamy go do ewakuacji klientów.
 Handler zwalnia zajmowane miejsce i kończy proces klienta.
@@ -587,7 +587,7 @@ if (signal(SIGTERM, handler_ewakuacja) == SIG_ERR) {
 }
 ```
 
-#### kill() - main.c:51 (wysłanie do grupy procesów)
+#### [kill() - main.c:51](https://github.com/otfpubert/SOPROJEKT/blob/main/main.c#L51) (wysłanie do grupy procesów)
 
 Funkcja `kill()` wysyła sygnał do procesu lub grupy procesów.
 Gdy PID = 0, sygnał jest wysyłany do wszystkich procesów w tej samej grupie.
@@ -601,7 +601,7 @@ if (kill(0, SIGTERM) == -1 && errno != ESRCH) {
 }
 ```
 
-#### kill() - kierownik.c:117 (SIGUSR1 do kucharza)
+#### [kill() - kierownik.c:117](https://github.com/otfpubert/SOPROJEKT/blob/main/kierownik.c#L117) (SIGUSR1 do kucharza)
 
 Kierownik wysyła SIGUSR1 do konkretnego procesu kucharza.
 Najpierw sprawdzamy czy PID jest poprawny (>0).
@@ -619,7 +619,7 @@ if (kill(kucharz, SIGUSR1) == -1) {
 }
 ```
 
-#### kill() - kierownik.c:128 (SIGUSR1 do taśmy)
+#### [kill() - kierownik.c:128](https://github.com/otfpubert/SOPROJEKT/blob/main/kierownik.c#L128) (SIGUSR1 do taśmy)
 
 Wysyłamy ten sam sygnał do procesu taśmy, żeby też przyspieszył.
 Sprawdzamy czy PID taśmy jest poprawny przed wysłaniem.
@@ -631,7 +631,7 @@ if (tasma > 0 && kill(tasma, SIGUSR1) == 0) {
 }
 ```
 
-#### kill() - kierownik.c:141 (SIGUSR2 do kucharza)
+#### [kill() - kierownik.c:141](https://github.com/otfpubert/SOPROJEKT/blob/main/kierownik.c#L141) (SIGUSR2 do kucharza)
 
 Analogicznie jak SIGUSR1, ale SIGUSR2 spowalnia produkcję.
 Kierownik używa tej opcji gdy na taśmie jest za dużo jedzenia.
@@ -646,7 +646,7 @@ if (kill(kucharz, SIGUSR2) == -1) {
 }
 ```
 
-#### kill() - kierownik.c:166 (SIGTERM - ewakuacja)
+#### [kill() - kierownik.c:166](https://github.com/otfpubert/SOPROJEKT/blob/main/kierownik.c#L166) (SIGTERM - ewakuacja)
 
 Pętla iteruje po wszystkich klientach w pamięci dzielonej.
 Dla każdego aktywnego klienta wysyłamy SIGTERM.
@@ -666,7 +666,7 @@ for (int i = 0; i < MAX_KLIENTOW; i++) {
 
 ### 2.4 Synchronizacja procesów - semafory
 
-#### ftok() - main.c:99
+#### [ftok() - main.c:99](https://github.com/otfpubert/SOPROJEKT/blob/main/main.c#L99)
 
 Funkcja `ftok()` generuje unikalny klucz IPC na podstawie:
 - Ścieżki do istniejącego pliku ("ipc_keyfile")
@@ -683,7 +683,7 @@ if (key == -1) {
 }
 ```
 
-#### semget() - main.c:116
+#### [semget() - main.c:116](https://github.com/otfpubert/SOPROJEKT/blob/main/main.c#L116)
 
 Funkcja `semget()` tworzy nowy zestaw semaforów lub łączy się z istniejącym.
 Argumenty:
@@ -702,7 +702,7 @@ if (g_sem_id == -1) {
 }
 ```
 
-#### semget() - klient.c:129 (połączenie z istniejącym)
+#### [semget() - klient.c:129](https://github.com/otfpubert/SOPROJEKT/blob/main/klient.c#L129) (połączenie z istniejącym)
 
 Proces klienta łączy się z istniejącym semaforem (stworzonym przez main).
 Flaga 0 oznacza "tylko połącz, nie twórz".
@@ -716,7 +716,7 @@ if (sem == -1) {
 }
 ```
 
-#### semctl() - main.c:135 (inicjalizacja mutex)
+#### [semctl() - main.c:135](https://github.com/otfpubert/SOPROJEKT/blob/main/main.c#L135) (inicjalizacja mutex)
 
 Funkcja `semctl()` wykonuje operacje kontrolne na semaforze.
 `SETVAL` ustawia wartość semafora.
@@ -729,7 +729,7 @@ if (semctl(g_sem_id, SEM_MUTEX, SETVAL, 1) == -1) {
 }
 ```
 
-#### semctl() - main.c:141 (inicjalizacja licznika)
+#### [semctl() - main.c:141](https://github.com/otfpubert/SOPROJEKT/blob/main/main.c#L141) (inicjalizacja licznika)
 
 SEM_ACTIVE to semafor licznikowy - zlicza aktywnych klientów.
 Wartość 0 na starcie oznacza "brak klientów".
@@ -742,7 +742,7 @@ if (semctl(g_sem_id, SEM_ACTIVE, SETVAL, 0) == -1) {
 }
 ```
 
-#### semctl() - main.c:66 (usuwanie)
+#### [semctl() - main.c:66](https://github.com/otfpubert/SOPROJEKT/blob/main/main.c#L66) (usuwanie)
 
 `IPC_RMID` usuwa zestaw semaforów z systemu.
 Po usunięciu wszystkie procesy czekające na semaforze dostaną błąd EIDRM.
@@ -756,7 +756,7 @@ if (semctl(g_sem_id, 0, IPC_RMID) == -1) {
 }
 ```
 
-#### semop() - wspolne.h:192 (lock - blokada)
+#### [semop() - wspolne.h:192](https://github.com/otfpubert/SOPROJEKT/blob/main/wspolne.h#L192) (lock - blokada)
 
 Funkcja `semop()` wykonuje atomową operację na semaforze.
 Struktura sembuf:
@@ -779,7 +779,7 @@ static inline void lock(int sem) {
 }
 ```
 
-#### semop() - wspolne.h:205 (unlock - odblokowanie)
+#### [semop() - wspolne.h:205](https://github.com/otfpubert/SOPROJEKT/blob/main/wspolne.h#L205) (unlock - odblokowanie)
 
 Operacja +1 zwiększa wartość semafora, pozwalając innemu procesowi wejść.
 Para lock/unlock tworzy sekcję krytyczną - tylko jeden proces może być w środku.
@@ -795,7 +795,7 @@ static inline void unlock(int sem) {
 }
 ```
 
-#### semop() - wspolne.h:243 (inkrementacja licznika)
+#### [semop() - wspolne.h:243](https://github.com/otfpubert/SOPROJEKT/blob/main/wspolne.h#L243) (inkrementacja licznika)
 
 Zwiększa wartość semafora SEM_ACTIVE o 1.
 Wywoływane gdy nowy klient wchodzi do restauracji.
@@ -812,7 +812,7 @@ static inline void sem_inc(int sem_id, int idx) {
 }
 ```
 
-#### semop() - wspolne.h:254 (dekrementacja licznika)
+#### [semop() - wspolne.h:254](https://github.com/otfpubert/SOPROJEKT/blob/main/wspolne.h#L254) (dekrementacja licznika)
 
 Zmniejsza wartość semafora SEM_ACTIVE o 1.
 Wywoływane gdy klient wychodzi z restauracji.
@@ -828,7 +828,7 @@ static inline void sem_dec(int sem_id, int idx) {
 }
 ```
 
-#### semop() - wspolne.h:267 (czekanie na zero)
+#### [semop() - wspolne.h:267](https://github.com/otfpubert/SOPROJEKT/blob/main/wspolne.h#L267) (czekanie na zero)
 
 Operacja 0 blokuje proces dopóki wartość semafora nie spadnie do 0.
 Używane przez main do czekania aż wszyscy klienci wyjdą.
@@ -847,7 +847,7 @@ static inline void sem_wait_zero(int sem_id, int idx) {
 
 ### 2.5 Segmenty pamięci dzielonej
 
-#### shmget() - main.c:107 (tworzenie)
+#### [shmget() - main.c:107](https://github.com/otfpubert/SOPROJEKT/blob/main/main.c#L107) (tworzenie)
 
 Funkcja `shmget()` tworzy nowy segment pamięci dzielonej.
 Argumenty:
@@ -866,7 +866,7 @@ if (g_shm_id == -1) {
 }
 ```
 
-#### shmget() - klient.c:123 (połączenie z istniejącą)
+#### [shmget() - klient.c:123](https://github.com/otfpubert/SOPROJEKT/blob/main/klient.c#L123) (połączenie z istniejącą)
 
 Klient łączy się z pamięcią stworzoną przez main.
 Flaga 0 oznacza "tylko połącz".
@@ -880,7 +880,7 @@ if (shm == -1) {
 }
 ```
 
-#### shmat() - main.c:147
+#### [shmat() - main.c:147](https://github.com/otfpubert/SOPROJEKT/blob/main/main.c#L147)
 
 Funkcja `shmat()` dołącza segment pamięci do przestrzeni adresowej procesu.
 Argumenty:
@@ -899,7 +899,7 @@ if (r == (void *)-1) {
 }
 ```
 
-#### shmat() - klient.c:142
+#### [shmat() - klient.c:142](https://github.com/otfpubert/SOPROJEKT/blob/main/klient.c#L142)
 
 Każdy proces klienta też dołącza pamięć do swojej przestrzeni.
 Wskaźnik `r` w każdym procesie wskazuje na tę samą fizyczną pamięć.
@@ -913,7 +913,7 @@ if (r == (void *)-1) {
 }
 ```
 
-#### shmdt() - klient.c:461
+#### [shmdt() - klient.c:461](https://github.com/otfpubert/SOPROJEKT/blob/main/klient.c#L461)
 
 Funkcja `shmdt()` odłącza segment od przestrzeni adresowej procesu.
 Nie usuwa segmentu - tylko odłącza ten proces.
@@ -925,7 +925,7 @@ if (shmdt(r) == -1) {
 }
 ```
 
-#### shmdt() - obsluga.c:659
+#### [shmdt() - obsluga.c:659](https://github.com/otfpubert/SOPROJEKT/blob/main/obsluga.c#L659)
 
 Analogicznie proces obsługi odłącza się przed zakończeniem.
 
@@ -935,7 +935,7 @@ if (shmdt(r) == -1) {
 }
 ```
 
-#### shmctl() - main.c:57 (usuwanie)
+#### [shmctl() - main.c:57](https://github.com/otfpubert/SOPROJEKT/blob/main/main.c#L57) (usuwanie)
 
 Funkcja `shmctl()` z flagą `IPC_RMID` oznacza segment do usunięcia.
 Segment zostanie faktycznie usunięty gdy ostatni proces się odłączy.
@@ -953,7 +953,7 @@ if (shmctl(g_shm_id, IPC_RMID, NULL) == -1) {
 
 ### 2.6 Kolejki komunikatów
 
-#### msgget() - main.c:125 (tworzenie)
+#### [msgget() - main.c:125](https://github.com/otfpubert/SOPROJEKT/blob/main/main.c#L125) (tworzenie)
 
 Funkcja `msgget()` tworzy nową kolejkę komunikatów.
 Kolejka działa jak bufor FIFO - procesy mogą wysyłać i odbierać wiadomości.
@@ -969,7 +969,7 @@ if (g_msg_id == -1) {
 }
 ```
 
-#### msgget() - klient.c:135 (połączenie z istniejącą)
+#### [msgget() - klient.c:135](https://github.com/otfpubert/SOPROJEKT/blob/main/klient.c#L135) (połączenie z istniejącą)
 
 Klient łączy się z kolejką stworzoną przez main.
 Używa tej samej kolejki do:
@@ -985,7 +985,7 @@ if (msg == -1) {
 }
 ```
 
-#### msgsnd() - klient.c:210 (wysłanie zgłoszenia)
+#### [msgsnd() - klient.c:210](https://github.com/otfpubert/SOPROJEKT/blob/main/klient.c#L210) (wysłanie zgłoszenia)
 
 Funkcja `msgsnd()` wysyła komunikat do kolejki.
 Struktura komunikatu:
@@ -1015,7 +1015,7 @@ while (msgsnd(msg, &zapytanie, sizeof(struct komunikat) - sizeof(long), 0) == -1
 }
 ```
 
-#### msgsnd() - obsluga.c:269 (wysłanie zaproszenia)
+#### [msgsnd() - obsluga.c:269](https://github.com/otfpubert/SOPROJEKT/blob/main/obsluga.c#L269) (wysłanie zaproszenia)
 
 Obsługa wysyła odpowiedź z przydzielonym miejscem.
 `mtype = pid` - typ to PID klienta, więc tylko ten klient odbierze tę wiadomość.
@@ -1034,7 +1034,7 @@ if (msgsnd(msg_id, &zaproszenie, sizeof(struct komunikat) - sizeof(long), 0) == 
 }
 ```
 
-#### msgsnd() - klient.c:397 (żądanie rachunku)
+#### [msgsnd() - klient.c:397](https://github.com/otfpubert/SOPROJEKT/blob/main/klient.c#L397) (żądanie rachunku)
 
 Lider grupy wysyła żądanie rachunku do kasy.
 `mtype = MSG_KASA_REQ + moj_gid` - unikalny typ dla żądań rachunku.
@@ -1054,7 +1054,7 @@ while (msgsnd(msg, &req, sizeof(struct komunikat_kasa_req) - sizeof(long), 0) ==
 }
 ```
 
-#### msgsnd() - obsluga.c:405 (odpowiedź z rachunkiem)
+#### [msgsnd() - obsluga.c:405](https://github.com/otfpubert/SOPROJEKT/blob/main/obsluga.c#L405) (odpowiedź z rachunkiem)
 
 Kasa wysyła odpowiedź z obliczoną sumą do zapłaty.
 `mtype = pid_lidera` - tylko lider grupy odbierze rachunek.
@@ -1071,7 +1071,7 @@ if (msgsnd(msg, &kasa_resp, sizeof(kasa_resp) - sizeof(long), 0) == -1) {
 }
 ```
 
-#### msgrcv() - klient.c:225 (oczekiwanie na miejsce)
+#### [msgrcv() - klient.c:225](https://github.com/otfpubert/SOPROJEKT/blob/main/klient.c#L225) (oczekiwanie na miejsce)
 
 Funkcja `msgrcv()` odbiera komunikat z kolejki.
 Argumenty:
@@ -1099,7 +1099,7 @@ while (1) {
 }
 ```
 
-#### msgrcv() - obsluga.c:360 (odbieranie zgłoszeń - non-blocking)
+#### [msgrcv() - obsluga.c:360](https://github.com/otfpubert/SOPROJEKT/blob/main/obsluga.c#L360) (odbieranie zgłoszeń - non-blocking)
 
 Flaga `IPC_NOWAIT` sprawia że funkcja nie blokuje - zwraca od razu.
 Jeśli nie ma wiadomości, zwraca -1 z errno = ENOMSG.
@@ -1117,7 +1117,7 @@ while ((recv_result = msgrcv(msg, &buf, sizeof(struct komunikat) - sizeof(long),
 }
 ```
 
-#### msgrcv() - obsluga.c:380 (odbieranie żądań rachunków)
+#### [msgrcv() - obsluga.c:380](https://github.com/otfpubert/SOPROJEKT/blob/main/obsluga.c#L380) (odbieranie żądań rachunków)
 
 Ujemny typ `-X` oznacza "odbierz dowolny komunikat z typem <= X".
 Pozwala to odebrać żądania rachunków od różnych grup.
@@ -1132,7 +1132,7 @@ while (msgrcv(msg, &kasa_req, sizeof(kasa_req) - sizeof(long),
 }
 ```
 
-#### msgrcv() - klient.c:407 (odbieranie rachunku)
+#### [msgrcv() - klient.c:407](https://github.com/otfpubert/SOPROJEKT/blob/main/klient.c#L407) (odbieranie rachunku)
 
 Lider czeka na rachunek od kasy.
 Typ = getpid() zapewnia że tylko ten lider odbierze swoją odpowiedź.
@@ -1147,7 +1147,7 @@ while (msgrcv(msg, &resp, sizeof(struct komunikat_kasa_resp) - sizeof(long), get
 }
 ```
 
-#### msgctl() - main.c:75 (usuwanie)
+#### [msgctl() - main.c:75](https://github.com/otfpubert/SOPROJEKT/blob/main/main.c#L75) (usuwanie)
 
 Funkcja `msgctl()` z flagą `IPC_RMID` usuwa kolejkę komunikatów.
 Wszystkie oczekujące wiadomości są tracone.
@@ -1165,7 +1165,7 @@ if (msgctl(g_msg_id, IPC_RMID, NULL) == -1) {
 
 ## 3. Struktury Danych
 
-### 3.1 Główna struktura restauracji (wspolne.h:158-185)
+### 3.1 [Główna struktura restauracji (wspolne.h:158-185)](https://github.com/otfpubert/SOPROJEKT/blob/main/wspolne.h#L158-L185)
 
 Struktura `restauracja` jest przechowywana w pamięci dzielonej i zawiera
 cały stan symulacji. Wszystkie procesy mają dostęp do tych samych danych.
@@ -1199,7 +1199,7 @@ struct restauracja {
 };
 ```
 
-### 3.2 Struktura talerzyka (wspolne.h:96-100)
+### 3.2 [Struktura talerzyka (wspolne.h:96-100)](https://github.com/otfpubert/SOPROJEKT/blob/main/wspolne.h#L96-L100)
 
 Reprezentuje jeden talerzyk sushi na taśmie.
 
@@ -1211,7 +1211,7 @@ struct talerzyk {
 };
 ```
 
-### 3.3 Struktury komunikatów (wspolne.h:61-87)
+### 3.3 [Struktury komunikatów (wspolne.h:61-87)](https://github.com/otfpubert/SOPROJEKT/blob/main/wspolne.h#L61-L87)
 
 Komunikaty używane w kolejce komunikatów do wymiany informacji między procesami.
 
@@ -1246,7 +1246,7 @@ struct komunikat_kasa_resp {
 
 ## 4. Handlery Sygnałów
 
-### 4.1 Handler SIGALRM - timer (kucharz.c:37-40)
+### 4.1 [Handler SIGALRM - timer (kucharz.c:37-40)](https://github.com/otfpubert/SOPROJEKT/blob/main/kucharz.c#L37-L40)
 
 Wywoływany co sekundę przez timer systemowy.
 Ustawia flagę `tick_flag`, która jest sprawdzana w pętli głównej.
@@ -1259,7 +1259,7 @@ void handler_alarm(int sig) {
 }
 ```
 
-### 4.2 Handler SIGUSR1 - przyspieszenie (kucharz.c:47-51)
+### 4.2 [Handler SIGUSR1 - przyspieszenie (kucharz.c:47-51)](https://github.com/otfpubert/SOPROJEKT/blob/main/kucharz.c#L47-L51)
 
 Zmniejsza opóźnienie produkcji o połowę (2x szybciej).
 Minimum to 1 tick - nie można zejść niżej.
@@ -1273,7 +1273,7 @@ void handler_szybciej(int sig) {
 }
 ```
 
-### 4.3 Handler SIGUSR2 - spowolnienie (kucharz.c:58-62)
+### 4.3 [Handler SIGUSR2 - spowolnienie (kucharz.c:58-62)](https://github.com/otfpubert/SOPROJEKT/blob/main/kucharz.c#L58-L62)
 
 Zwiększa opóźnienie produkcji dwukrotnie (2x wolniej).
 Maximum to 4 ticki - nie można iść wyżej.
@@ -1287,7 +1287,7 @@ void handler_wolniej(int sig) {
 }
 ```
 
-### 4.4 Handler SIGTERM - ewakuacja (klient.c:45-57)
+### 4.4 [Handler SIGTERM - ewakuacja (klient.c:45-57)](https://github.com/otfpubert/SOPROJEKT/blob/main/klient.c#L45-L57)
 
 Obsługuje polecenie ewakuacji od kierownika.
 Zwalnia zajmowane miejsce w pamięci dzielonej.
@@ -1310,7 +1310,7 @@ void handler_ewakuacja(int sig) {
 }
 ```
 
-### 4.5 Handler SIGINT - sprzątanie (main.c:47-84)
+### 4.5 [Handler SIGINT - sprzątanie (main.c:47-84)](https://github.com/otfpubert/SOPROJEKT/blob/main/main.c#L47-L84)
 
 Obsługuje Ctrl+C - czyste zamknięcie programu.
 Wysyła SIGTERM do wszystkich procesów potomnych.
@@ -1354,7 +1354,7 @@ void sprzatanie(int sig) {
 
 ## 5. Algorytm Przydzielania Miejsc ("Tetris")
 
-### 5.1 Priorytet VIP (obsluga.c:222-244)
+### 5.1 [Priorytet VIP (obsluga.c:222-244)](https://github.com/otfpubert/SOPROJEKT/blob/main/obsluga.c#L222-L244)
 
 Grupy VIP są wstawiane na początek kolejki (przed zwykłymi klientami).
 Szukamy pierwszej pozycji bez priorytetu i wstawiamy tam VIP-a.
@@ -1388,7 +1388,7 @@ void wstaw_do_kolejki(wpis_kolejki *q, int *cnt, pid_t pid, int priority) {
 }
 ```
 
-### 5.2 Dosiadanie równoliczne (obsluga.c:485-498)
+### 5.2 [Dosiadanie równoliczne (obsluga.c:485-498)](https://github.com/otfpubert/SOPROJEKT/blob/main/obsluga.c#L485-L498)
 
 Grupy mogą dzielić stolik tylko z grupami o tym samym rozmiarze.
 Np. dwie grupy 2-osobowe mogą siedzieć przy stoliku 4-osobowym.
@@ -1419,7 +1419,7 @@ if (q2_cnt > 0) {
 
 ---
 
-## 6. System Głodu Klienta (klient.c:31-38)
+## 6. [System Głodu Klienta (klient.c:31-38)](https://github.com/otfpubert/SOPROJEKT/blob/main/klient.c#L31-L38)
 
 Klient nie je ciągle - musi najpierw "zgłodnieć".
 Głód rośnie co sekundę (SIGALRM). Gdy osiągnie próg, klient może jeść.
@@ -1437,7 +1437,7 @@ void handler_glod(int sig) {
 }
 ```
 
-Użycie w pętli głównej (klient.c:301-329):
+Użycie w [pętli głównej (klient.c:301-329)](https://github.com/otfpubert/SOPROJEKT/blob/main/klient.c#L301-L329):
 
 ```c
 // Inkrementacja głodu przy każdym SIGALRM
@@ -1466,7 +1466,7 @@ if (czy_jem) {
 
 ## 7. Obsługa Błędów (perror i errno)
 
-### 7.1 Funkcja check_error (wspolne.h:27-32)
+### 7.1 [Funkcja check_error (wspolne.h:27-32)](https://github.com/otfpubert/SOPROJEKT/blob/main/wspolne.h#L27-L32)
 
 Funkcja pomocnicza do sprawdzania błędów systemowych.
 Jeśli funkcja zwróciła -1 (błąd), wypisuje komunikat i kończy program.
@@ -1480,7 +1480,7 @@ static inline void check_error(int ret, const char *msg) {
 }
 ```
 
-### 7.2 Obsługa EINTR (klient.c:210-220)
+### 7.2 [Obsługa EINTR (klient.c:210-220)](https://github.com/otfpubert/SOPROJEKT/blob/main/klient.c#L210-L220)
 
 EINTR oznacza że wywołanie systemowe zostało przerwane przez sygnał.
 Nie jest to prawdziwy błąd - po prostu powtarzamy operację.
@@ -1498,7 +1498,7 @@ while (msgsnd(msg, &zapytanie, sizeof(struct komunikat) - sizeof(long), 0) == -1
 }
 ```
 
-### 7.3 Obsługa EIDRM (obsluga.c:370-375)
+### 7.3 [Obsługa EIDRM (obsluga.c:370-375)](https://github.com/otfpubert/SOPROJEKT/blob/main/obsluga.c#L370-L375)
 
 EIDRM oznacza że zasób IPC został usunięty (np. przy zamykaniu restauracji).
 Nie jest to błąd - to normalna sytuacja przy shutdown.
@@ -1517,7 +1517,7 @@ if (recv_result == -1 && errno != ENOMSG && errno != EINTR) {
 
 ## 8. Walidacja Danych Wejściowych
 
-### 8.1 Walidacja argumentów klienta (klient.c:101-113)
+### 8.1 [Walidacja argumentów klienta (klient.c:101-113)](https://github.com/otfpubert/SOPROJEKT/blob/main/klient.c#L101-L113)
 
 Sprawdzamy czy argumenty przekazane do procesu klienta są poprawne.
 ID grupy musi być w zakresie 0 do MAX_GRUP-1.
@@ -1539,7 +1539,7 @@ if (moja_grupa_size < 1 || moja_grupa_size > 4) {
 }
 ```
 
-### 8.2 Walidacja w kierowniku (kierownik.c:78-92)
+### 8.2 [Walidacja w kierowniku (kierownik.c:78-92)](https://github.com/otfpubert/SOPROJEKT/blob/main/kierownik.c#L78-L92)
 
 Sprawdzamy czy użytkownik wpisał poprawną liczbę.
 scanf zwraca liczbę poprawnie odczytanych elementów.
@@ -1567,7 +1567,7 @@ if (wybor < 0 || wybor > 3) {
 }
 ```
 
-### 8.3 Walidacja zgłoszeń (obsluga.c:361-367)
+### 8.3 [Walidacja zgłoszeń (obsluga.c:361-367)](https://github.com/otfpubert/SOPROJEKT/blob/main/obsluga.c#L361-L367)
 
 Sprawdzamy dane otrzymane przez kolejkę komunikatów.
 Rozmiar grupy musi być 1-4, PID musi być dodatni.
@@ -1584,7 +1584,7 @@ if (buf.rozmiar_grupy >= 1 && buf.rozmiar_grupy <= 4 && buf.pid_nadawcy > 0) {
 
 ---
 
-## 9. Walidacja dzieci (main.c:307-334)
+## 9. [Walidacja dzieci (main.c:307-334)](https://github.com/otfpubert/SOPROJEKT/blob/main/main.c#L307-L334)
 
 Zgodnie z tematem: "Osoba dorosła może opiekować się jednocześnie
 co najwyżej trzema dziećmi w wieku do 10 lat."
