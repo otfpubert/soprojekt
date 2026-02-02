@@ -23,7 +23,7 @@
 
 #include "wspolne.h"
 
-#define LICZBA_GRUP 30  /* Liczba grup do symulacji */
+#define LICZBA_GRUP 50  /* Liczba grup do symulacji */
 
 /* Flaga timera do tworzenia grup */
 volatile sig_atomic_t utworz_grupe_flag = 0;
@@ -286,7 +286,7 @@ int main() {
 
         utworz_grupe_flag = 0;
 
-        int rozmiar = 1 + rand() % 4;
+        int rozmiar = 1;
 
         /* Tablice VLA dla statusu członków grupy */
         int member_vip[rozmiar];
@@ -295,7 +295,7 @@ int main() {
 
         /* Losowanie statusu VIP i dziecka dla każdego członka */
         for (int k = 0; k < rozmiar; k++) {
-            if (rand() % 100 < 2) {  /* 2% szans na VIP */
+            if (rand() % 100 < 0) {  /* 0% szans na VIP */
                 member_vip[k] = 1;
                 group_has_priority = 1;
             } else {
@@ -368,7 +368,7 @@ int main() {
         g++;
 
         /* Ustawienie losowego timera na następną grupę (1-3 sekundy) */
-        int losowy_delay = 1 + rand() % 3;
+        int losowy_delay = 1 + rand() % 2;
         timer_grup.it_value.tv_sec = losowy_delay;
         timer_grup.it_value.tv_usec = 0;
         if (setitimer(ITIMER_REAL, &timer_grup, NULL) == -1) {

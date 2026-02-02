@@ -1,0 +1,31 @@
+[Mon Feb  2 14:01:00 2026] OBSLUGA: Przydzielono LADE 0 dla PID 347561
+[Mon Feb  2 14:01:01 2026] OBSLUGA: Przydzielono LADE 2 dla PID 380716
+[Mon Feb  2 14:01:01 2026] KLIENT PID=380716 (G=0): Otrzymalem miejsce nr 2 (Typ: 0)
+[Mon Feb  2 14:01:01 2026] KLIENT 380716 (G=0): USIADL przy LADZIE 2 (seg=3)
+[Mon Feb  2 14:01:03 2026] OBSLUGA: Przydzielono LADE 3 dla PID 380733
+[Mon Feb  2 14:01:03 2026] KLIENT PID=380733 (G=1): Otrzymalem miejsce nr 3 (Typ: 0)
+[Mon Feb  2 14:01:03 2026] KLIENT 380733 (G=1): USIADL przy LADZIE 3 (seg=4)
+[Mon Feb  2 14:01:04 2026] OBSLUGA: Przydzielono LADE 4 dla PID 380741
+[Mon Feb  2 14:01:04 2026] KLIENT PID=380741 (G=2): Otrzymalem miejsce nr 4 (Typ: 0)
+[Mon Feb  2 14:01:04 2026] KLIENT 380741 (G=2): USIADL przy LADZIE 4 (seg=5)
+[Mon Feb  2 14:01:05 2026] OBSLUGA: Przydzielono LADE 5 dla PID 380747
+[Mon Feb  2 14:01:05 2026] KLIENT PID=380747 (G=3): Otrzymalem miejsce nr 5 (Typ: 0)
+[Mon Feb  2 14:01:05 2026] KLIENT 380747 (G=3): USIADL przy LADZIE 5 (seg=6)
+[Mon Feb  2 14:01:06 2026] OBSLUGA: Przydzielono LADE 6 dla PID 380751
+[Mon Feb  2 14:01:06 2026] KLIENT PID=380751 (G=4): Otrzymalem miejsce nr 6 (Typ: 0)
+[Mon Feb  2 14:01:06 2026] KLIENT 380751 (G=4): USIADL przy LADZIE 6 (seg=7)
+[Mon Feb  2 14:01:07 2026] OBSLUGA: Przydzielono LADE 7 dla PID 380754
+[Mon Feb  2 14:01:07 2026] KLIENT PID=380754 (G=5): Otrzymalem miejsce nr 7 (Typ: 0)
+[Mon Feb  2 14:01:07 2026] KLIENT 380754 (G=5): USIADL przy LADZIE 7 (seg=8)
+[Mon Feb  2 14:01:09 2026] OBSLUGA: Przydzielono LADE 8 dla PID 380787
+[Mon Feb  2 14:01:09 2026] KLIENT PID=380787 (G=6): Otrzymalem miejsce nr 8 (Typ: 0)
+[Mon Feb  2 14:01:09 2026] KLIENT 380787 (G=6): USIADL przy LADZIE 8 (seg=9)
+[Mon Feb  2 14:01:10 2026] OBSLUGA: Przydzielono STOLIK 0 dla PID 380791
+[Mon Feb  2 14:01:10 2026] KLIENT PID=380791 (G=7): Otrzymalem miejsce nr 0 (Typ: 1)
+[Mon Feb  2 14:01:10 2026] KLIENT 380791 (G=7): USIADL przy STOLIKU 0 (seg=10)
+[Mon Feb  2 14:01:12 2026] OBSLUGA: Przydzielono STOLIK 0 dla PID 380792
+[Mon Feb  2 14:01:12 2026] KLIENT PID=380792 (G=8): Otrzymalem miejsce nr 0 (Typ: 1)
+[Mon Feb  2 14:01:12 2026] KLIENT 380792 (G=8): USIADL przy STOLIKU 0 (seg=10)
+[Mon Feb  2 14:01:13 2026] OBSLUGA: Przydzielono STOLIK 1 dla PID 380797
+[Mon Feb  2 14:01:13 2026] KLIENT PID=380797 (G=9): Otrzymalem miejsce nr 1 (Typ: 1)
+[Mon Feb  2 14:01:13 2026] KLIENT 380797 (G=9): USIADL przy STOLIKU 1 (seg=11)
